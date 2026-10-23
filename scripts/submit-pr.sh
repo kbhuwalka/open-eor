@@ -4,6 +4,11 @@
 # CI runs automatically on pull_request (no label retrigger). Required checks:
 #   Lint / Unit Tests / Production Build / End-to-End Tests
 #
+# Those four jobs are decided from Actions workflow runs for the PR head SHA
+# (`gh run list` / `gh run view` on the Quality Gates workflow). This script
+# does not read statusCheckRollup or the Checks API. A 403 from the Actions
+# API is fatal: the token cannot read Actions, and that is not pending CI.
+#
 # The merge gate is those checks (and a clean merge). This script does not
 # read reviewDecision, an APPROVED review state, or pull-request reviews,
 # and it does not call the pull-request review API. GH_TOKEN is the PR
@@ -23,6 +28,7 @@ if ! command -v gh >/dev/null 2>&1; then
 fi
 
 REQUIRED_CHECKS=("Lint" "Unit Tests" "Production Build" "End-to-End Tests")
+WORKFLOW_NAME="Quality Gates"
 
 # ---------------------------------------------------------------------------
 # Help
@@ -38,19 +44,24 @@ USAGE
 
 DESCRIPTION
   1. Checks the PR for merge conflicts (exits 2 if conflicting).
-  2. If all required checks are already green on the current commit,
-     skips watching and goes directly to merge (unless --no-merge).
-  3. Otherwise watches the Quality Gates workflow run for the PR head
-     until required checks complete (or timeout).
-  4. Squash-merges the PR when those checks pass, unless --no-merge is given.
+  2. Decides the four required jobs from the Quality Gates Actions workflow
+     run for the PR head SHA (`gh run list` / `gh run view`). It does not
+     read statusCheckRollup or the Checks API.
+  3. If those jobs already succeeded, skips watching and squash-merges
+     (unless --no-merge).
+  4. If they are still running, or the run has not appeared yet, watches
+     the workflow run until they complete (or timeout).
+  5. Squash-merges the PR when those jobs pass, unless --no-merge is given.
      A GitHub pull-request review approval is not required.
-  5. Closes the linked issue if --issue is provided or the PR body
+  6. Closes the linked issue if --issue is provided or the PR body
      contains a "Closes #N" / "Fixes #N" / "Resolves #N" reference.
 
   Required check names (exact):
     Lint, Unit Tests, Production Build, End-to-End Tests
 
   There is no label-gated CI. Pushing/updating a PR triggers Quality Gates.
+  If the Actions API returns 403, the script exits 1 and reports that the
+  token cannot read Actions. That failure is not pending CI.
   This script does not require reviewDecision or an APPROVED review state,
   and it does not call the pull-request review API.
 
@@ -62,7 +73,7 @@ OPTIONS
 
 EXIT CODES
   0  Checks passed (and PR merged unless --no-merge was given)
-  1  CI failed, timed out, run not found, or merge failed
+  1  CI failed, timed out, run not found, Actions API forbidden, or merge failed
   2  PR has merge conflicts — CI was not watched for merge
 
 EXAMPLES
@@ -200,104 +211,159 @@ cancel_run() {
   return 1
 }
 
-# Returns SUCCESS if every required check name is SUCCESS; otherwise prints
-# a short status summary and returns non-zero via echo of the rollup state.
-required_checks_state() {
-  # Outputs one of: SUCCESS | PENDING | FAILURE | UNKNOWN
-  local rollup
-  rollup=$(gh pr view "$PR" --json statusCheckRollup --jq '.statusCheckRollup // []' 2>/dev/null || echo "[]")
-
-  local all_success=true
-  local any_failure=false
-  local any_pending=false
-  local found_count=0
-
-  for required in "${REQUIRED_CHECKS[@]}"; do
-    local match
-    match=$(echo "$rollup" | jq -c --arg name "$required" '
-      [.[] | select(.name == $name)] | .[0] // empty
-    ')
-
-    if [[ -z "$match" || "$match" == "null" ]]; then
-      any_pending=true
-      all_success=false
-      continue
-    fi
-
-    found_count=$((found_count + 1))
-    local status conclusion
-    status=$(echo "$match" | jq -r '.status // empty')
-    conclusion=$(echo "$match" | jq -r '.conclusion // .state // empty')
-
-    if [[ "$status" == "COMPLETED" || "$status" == "completed" || -n "$conclusion" ]]; then
-      case "$conclusion" in
-        SUCCESS|success)
-          ;;
-        FAILURE|failure|CANCELLED|cancelled|TIMED_OUT|timed_out|ERROR|error|ACTION_REQUIRED)
-          any_failure=true
-          all_success=false
-          ;;
-        *)
-          # Non-terminal or unknown
-          if [[ "$status" == "IN_PROGRESS" || "$status" == "in_progress" || \
-                "$status" == "QUEUED" || "$status" == "queued" || \
-                "$status" == "PENDING" || "$status" == "pending" || \
-                "$status" == "WAITING" || "$status" == "waiting" || \
-                -z "$conclusion" ]]; then
-            any_pending=true
-            all_success=false
-          else
-            any_pending=true
-            all_success=false
-          fi
-          ;;
-      esac
-    else
-      any_pending=true
-      all_success=false
-    fi
-  done
-
-  if [[ "$any_failure" == true ]]; then
-    echo "FAILURE"
-  elif [[ "$all_success" == true && "$found_count" -eq "${#REQUIRED_CHECKS[@]}" ]]; then
-    echo "SUCCESS"
-  elif [[ "$any_pending" == true ]]; then
-    echo "PENDING"
-  else
-    echo "UNKNOWN"
+# Run a gh command that reads Actions.
+# stdout: command output on success.
+# return 0 on success, 2 if the token cannot read Actions (403), 1 otherwise.
+# Does not exit the shell: callers run in command substitutions and must
+# propagate the status themselves. Never maps a 403 onto an empty result.
+gh_actions() {
+  local err_file out status=0
+  err_file=$(mktemp)
+  out=$(gh "$@" 2>"$err_file") || status=$?
+  if [[ $status -eq 0 ]]; then
+    rm -f "$err_file"
+    printf '%s\n' "$out"
+    return 0
   fi
+  if grep -Eqi 'not accessible by personal access token|HTTP 403|"status": *"403"' "$err_file" \
+    || grep -Eqi 'not accessible by personal access token|HTTP 403|"status": *"403"' <<<"$out"; then
+    echo "error: the token cannot read Actions (GitHub returned 403: Resource not accessible by personal access token)." >&2
+    cat "$err_file" >&2
+    rm -f "$err_file"
+    return 2
+  fi
+  cat "$err_file" >&2
+  rm -f "$err_file"
+  return 1
+}
+
+# JSON array of Quality Gates runs for HEAD_SHA, newest first.
+# return 0 with [] when no run exists yet; 2 on Actions 403; 1 on other errors.
+list_quality_gate_runs() {
+  local runs status=0 filtered
+  runs=$(gh_actions run list \
+    --repo "$REPO_NWO" \
+    --commit "$HEAD_SHA" \
+    --workflow "$WORKFLOW_NAME" \
+    --limit 20 \
+    --json databaseId,status,conclusion,headSha) || status=$?
+  if [[ $status -ne 0 ]]; then
+    return "$status"
+  fi
+  if ! filtered=$(printf '%s\n' "$runs" | jq -c --arg sha "$HEAD_SHA" '[.[] | select(.headSha == $sha)]'); then
+    echo "error: could not parse Actions workflow run list." >&2
+    return 1
+  fi
+  printf '%s\n' "$filtered"
+}
+
+# stdin: `gh run view --json status,conclusion,jobs`
+# stdout: SUCCESS | PENDING | FAILURE
+classify_required_jobs() {
+  local required_json
+  if ! required_json=$(printf '%s\n' "${REQUIRED_CHECKS[@]}" | jq -R . | jq -s -c .); then
+    echo "error: could not encode required check names." >&2
+    return 1
+  fi
+  jq -r --argjson required "$required_json" '
+    def lc: ascii_downcase;
+    def failed_conclusion:
+      ((. // "") | lc) as $c
+      | (["failure", "cancelled", "timed_out", "error", "action_required", "startup_failure", "skipped"] | index($c)) != null;
+    . as $run
+    | ($run.jobs // []) as $jobs
+    | ($run.status // "" | lc) as $run_status
+    | reduce $required[] as $name (
+        {failure: false, pending: false, success_count: 0};
+        [$jobs[] | select(.name == $name)] as $matches
+        | if ($matches | length) == 0 then
+            if $run_status == "completed" then .failure = true
+            else .pending = true
+            end
+          elif any($matches[]; (.conclusion | failed_conclusion)) then
+            .failure = true
+          elif any($matches[]; ((.status // "" | lc) != "completed")) then
+            .pending = true
+          elif all($matches[]; ((.status // "" | lc) == "completed" and ((.conclusion // "") | lc) == "success")) then
+            .success_count += 1
+          else
+            .failure = true
+          end
+      )
+    | if .failure then "FAILURE"
+      elif .pending then "PENDING"
+      elif .success_count == ($required | length) then "SUCCESS"
+      else "PENDING"
+      end
+  '
+}
+
+# stdout: SUCCESS | PENDING | FAILURE
+# PENDING when no run exists yet or required jobs are still running.
+# FAILURE when a required job failed, was cancelled/skipped, or is missing
+# from a completed run. Does not consult statusCheckRollup or the Checks API.
+required_checks_state() {
+  local runs status=0 run_id run_json state
+  runs=$(list_quality_gate_runs) || status=$?
+  if [[ $status -ne 0 ]]; then
+    return "$status"
+  fi
+  if ! run_id=$(printf '%s\n' "$runs" | jq -r '.[0].databaseId // empty'); then
+    echo "error: could not parse Actions workflow run list." >&2
+    return 1
+  fi
+  if [[ -z "$run_id" ]]; then
+    echo "PENDING"
+    return 0
+  fi
+  status=0
+  run_json=$(gh_actions run view "$run_id" --repo "$REPO_NWO" --json status,conclusion,jobs) || status=$?
+  if [[ $status -ne 0 ]]; then
+    return "$status"
+  fi
+  if ! state=$(printf '%s\n' "$run_json" | classify_required_jobs); then
+    echo "error: could not classify Actions jobs for run ${run_id}." >&2
+    return 1
+  fi
+  printf '%s\n' "$state"
 }
 
 find_active_quality_gate_run() {
-  local runs
-  runs=$(
-    gh run list --branch "$BRANCH" --workflow "Quality Gates" --limit 10 \
-      --json databaseId,status,headSha \
-      2>/dev/null || echo "[]"
-  )
-
-  echo "$runs" | jq -r --arg head_sha "$HEAD_SHA" '
-    .[]
-    | select(.headSha == $head_sha)
-    | select(.status != "completed")
-    | .databaseId
-  ' | head -1
+  local runs status=0
+  runs=$(list_quality_gate_runs) || status=$?
+  if [[ $status -ne 0 ]]; then
+    return "$status"
+  fi
+  printf '%s\n' "$runs" | jq -r '[.[] | select(.status != "completed") | .databaseId][0] // empty'
 }
 
 find_latest_quality_gate_run() {
-  local runs
-  runs=$(
-    gh run list --branch "$BRANCH" --workflow "Quality Gates" --limit 10 \
-      --json databaseId,status,headSha \
-      2>/dev/null || echo "[]"
-  )
+  local runs status=0
+  runs=$(list_quality_gate_runs) || status=$?
+  if [[ $status -ne 0 ]]; then
+    return "$status"
+  fi
+  printf '%s\n' "$runs" | jq -r '.[0].databaseId // empty'
+}
 
-  echo "$runs" | jq -r --arg head_sha "$HEAD_SHA" '
-    .[]
-    | select(.headSha == $head_sha)
-    | .databaseId
-  ' | head -1
+# Sets CHECK_STATE. Exits 1 on Actions 403 or any other read failure.
+read_check_state() {
+  local status=0
+  CHECK_STATE="$(required_checks_state)" || status=$?
+  if [[ $status -eq 2 ]]; then
+    exit 1
+  fi
+  if [[ $status -ne 0 ]]; then
+    echo "error: could not read Actions workflow runs for PR #${PR} (head ${HEAD_SHA:0:7})." >&2
+    exit 1
+  fi
+  case "$CHECK_STATE" in
+    SUCCESS|PENDING|FAILURE) ;;
+    *)
+      echo "error: unexpected Actions check state '${CHECK_STATE}' for PR #${PR}." >&2
+      exit 1
+      ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
@@ -337,7 +403,7 @@ fi
 # Step 2: Already green?
 # ---------------------------------------------------------------------------
 
-CHECK_STATE="$(required_checks_state)"
+read_check_state
 if [[ "$CHECK_STATE" == "SUCCESS" ]]; then
   echo "PR #${PR} — all required checks already green on current commit"
   if [[ "$MERGE" == false ]]; then
@@ -358,7 +424,15 @@ fi
 # Step 3: Find or wait for a Quality Gates run
 # ---------------------------------------------------------------------------
 
-RUN_ID="$(find_active_quality_gate_run)"
+run_lookup_status=0
+RUN_ID="$(find_active_quality_gate_run)" || run_lookup_status=$?
+if [[ $run_lookup_status -eq 2 ]]; then
+  exit 1
+fi
+if [[ $run_lookup_status -ne 0 ]]; then
+  echo "error: could not list Actions workflow runs for PR #${PR} (head ${HEAD_SHA:0:7})." >&2
+  exit 1
+fi
 if [[ -n "$RUN_ID" ]]; then
   echo "PR #${PR} — checks already running on ${BRANCH}; watching run ${RUN_ID}..."
 else
@@ -366,16 +440,27 @@ else
   RUN_ID=""
   for _ in {1..20}; do
     sleep 6
-    RUN_ID="$(find_active_quality_gate_run)"
+    run_lookup_status=0
+    RUN_ID="$(find_active_quality_gate_run)" || run_lookup_status=$?
+    if [[ $run_lookup_status -eq 2 ]]; then
+      exit 1
+    fi
+    if [[ $run_lookup_status -ne 0 ]]; then
+      echo "error: could not list Actions workflow runs for PR #${PR} (head ${HEAD_SHA:0:7})." >&2
+      exit 1
+    fi
     if [[ -z "$RUN_ID" ]]; then
-      RUN_ID="$(find_latest_quality_gate_run)"
-      # If latest is already completed, drop into check-state path below via watch skip
+      run_lookup_status=0
+      RUN_ID="$(find_latest_quality_gate_run)" || run_lookup_status=$?
+      if [[ $run_lookup_status -eq 2 ]]; then
+        exit 1
+      fi
+      if [[ $run_lookup_status -ne 0 ]]; then
+        echo "error: could not list Actions workflow runs for PR #${PR} (head ${HEAD_SHA:0:7})." >&2
+        exit 1
+      fi
+      # Completed or still queued: watch (or re-read) this run below.
       if [[ -n "$RUN_ID" ]]; then
-        local_status=$(gh run view "$RUN_ID" --json status --jq '.status' 2>/dev/null || echo "")
-        if [[ "$local_status" == "completed" ]]; then
-          break
-        fi
-        # still queued/in_progress — keep as RUN_ID
         break
       fi
     else
@@ -384,8 +469,8 @@ else
   done
 
   if [[ -z "$RUN_ID" ]]; then
-    # Last chance: required checks may have appeared without a discoverable run id
-    CHECK_STATE="$(required_checks_state)"
+    # Last chance: required jobs may have finished without a discoverable run id
+    read_check_state
     if [[ "$CHECK_STATE" == "SUCCESS" ]]; then
       echo "PR #${PR} — required checks became green while waiting"
       if [[ "$MERGE" == false ]]; then
@@ -449,15 +534,19 @@ printf "\r\033[K"
 RUN_URL="${REPO_URL}/actions/runs/${RUN_ID}"
 
 FINAL=""
-if ! FINAL=$(gh run view "$RUN_ID" --json status,conclusion,jobs \
+run_lookup_status=0
+FINAL="$(gh_actions run view "$RUN_ID" --repo "$REPO_NWO" --json status,conclusion,jobs \
   --jq '{
     status:     .status,
     conclusion: (.conclusion // "unknown"),
     failed:     [.jobs[] | select(.conclusion == "failure") | .name]
-  }' 2>&1); then
+  }')" || run_lookup_status=$?
+if [[ $run_lookup_status -eq 2 ]]; then
+  exit 1
+fi
+if [[ $run_lookup_status -ne 0 ]]; then
   echo "✗ PR #${PR} — could not fetch final run status" >&2
   echo "  Run: ${RUN_URL}" >&2
-  echo "  ${FINAL}" >&2
   exit 1
 fi
 
@@ -482,7 +571,7 @@ if [[ "$CONCLUSION" != "success" ]]; then
 fi
 
 # Double-check required job names succeeded (workflow may add extra jobs later).
-CHECK_STATE="$(required_checks_state)"
+read_check_state
 if [[ "$CHECK_STATE" != "SUCCESS" ]]; then
   echo "✗ PR #${PR} — workflow succeeded but required checks are not all SUCCESS" >&2
   echo "  Required: ${REQUIRED_CHECKS[*]}" >&2
