@@ -7,7 +7,7 @@ description: Engineer owns a GitHub Issue end-to-end — plan, implement, PR, sp
 
 Own the Issue until merge (or blocked). App is at **repo root**; **pnpm**; base **`main`**. Standards: `standards/engineering.md`, `standards/testing.md`.
 
-**Default placement: cloud agent** — use your own checkout. Branch off latest `main`. Do **not** run `worktree.sh` in the cloud.
+**Placement: cloud agent** — own checkout. Branch off latest `main`.
 
 ## Flow
 
@@ -51,10 +51,3 @@ Treat each finding as a **failure class**, not a line patch:
 ## Done when
 
 PR merged via `submit-pr.sh`, branch cleaned up as appropriate, reviewer workers closed.
-
-## Local Mac optional
-
-Only when running on Kunal’s self-hosted Mac (not cloud): you may isolate with
-`bash scripts/worktree.sh create cursor/issue-<n>-short-title` and later
-`worktree.sh cleanup …`. Ensure `PATH` includes `~/.local/bin` for `gh`. Cloud
-engineers must not treat worktrees as required.
