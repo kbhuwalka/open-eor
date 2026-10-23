@@ -9,8 +9,6 @@ Review feedback is evidence of a failure class, not a line-edit checklist.
 Before changing code, understand why the finding exists and what would prevent
 the same bug shape from surviving elsewhere in the PR's scope.
 
-For background workers, use `silent-mode` for human-facing chat.
-
 ## Required Context
 
 Before editing, read:

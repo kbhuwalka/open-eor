@@ -10,9 +10,6 @@ and PRs are the source of truth. App code lives at the **repo root** (not under
 `app/`). Package manager is **pnpm@10.33.4**; Node **24**. Base branch is
 **`main`**.
 
-For background workers, use `silent-mode` for human-facing chat. Interactive
-Project chat may stay concise without full silent mode.
-
 ## Goal Ownership
 
 Own the full lifecycle until the issue is implemented, verified, reviewed,

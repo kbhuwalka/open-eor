@@ -54,7 +54,6 @@ Project skills live under `.cursor/skills/` (Cursor loads these automatically):
 | `implementation-plan` | Discovery-first plan + contract/risk matrix before non-mechanical edits |
 | `review-pr` | Exhaustive review → binary verdict → `submit-review.sh` (Approve / Request changes) |
 | `address-feedback` | Treat review findings as failure classes; fix + re-proof |
-| `silent-mode` | Background workers only — no chat noise unless blocked/handoff |
 
 Ops scripts (`scripts/`):
 

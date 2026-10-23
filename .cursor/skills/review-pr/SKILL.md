@@ -13,8 +13,6 @@ through `scripts/submit-review.sh` (which posts a structured review and calls
 This is a Cursor reviewer worker — not Bugbot. CI remains the merge verify gate;
 review is the quality gate.
 
-For background workers, use `silent-mode` for human-facing chat.
-
 Reviewer goal: find the complete blocking set in the current review pass. Do
 not stop because you found enough issues to request changes.
 
