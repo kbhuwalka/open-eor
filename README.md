@@ -1,12 +1,10 @@
 # spacexai-demo
 
-Starter web app for Project SpaceXAI_Demo.
+EOR worker-onboarding demo for Project SpaceXAI_Demo (factory Issue→PR→review).
 
-**Stack:** React + Next.js (App Router) + TypeScript + shadcn/ui  
-**Tests:** Vitest (Vite) for unit/component, Playwright for e2e  
+**Stack:** Next.js App Router + TypeScript + shadcn/ui + **Drizzle + SQLite** + **iron-session**  
+**Tests:** Vitest (unit/component), Playwright (e2e)  
 **Package manager:** pnpm
-
-This repo keeps the default/starter UI. Product features are tracked in GitHub Issues.
 
 ## Specifications
 
@@ -14,17 +12,23 @@ Normative product and engineering specs live under [`docs/`](./docs/README.md) a
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 20+ (repo targets Node 24 via `.nvmrc` when available)
 - [pnpm](https://pnpm.io/) (`corepack enable && corepack prepare pnpm@10.33.4 --activate`)
 
-## Run locally
+## Database + seed
+
+SQLite file: `data/eor.sqlite` (gitignored). Override the path with `DATABASE_FILE`. Schema is applied on first open; seed runs automatically when `users` is empty. `pnpm db:seed` sets `FORCE_SEED=1` and wipes + reseeds.
 
 ```bash
 pnpm install
+pnpm db:push    # optional — drizzle-kit push against schema
+pnpm db:seed    # wipe+reseed demo world (sets FORCE_SEED)
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000). With no session it redirects to `/pick`. Choosing a persona sets an **iron-session** signed httpOnly cookie named `eor_session` that carries `userId` only (override the signing secret with `SESSION_SECRET`, at least 32 characters). Switch persona clears the cookie.
+
+Seeded personas: Client HR (Alex Harper), Worker (Jordan Lee, owns `case_pending_1`), Worker (Taylor Kim, no case), EOR Ops, EOR Reviewer. `hire_1` is `submitted` with a policy snapshot. The case is in `pending_review` with a List A fixture at `data/uploads/seed/list-a-passport.png`.
 
 ## Scripts
 
@@ -36,31 +40,23 @@ Open [http://localhost:3000](http://localhost:3000).
 | `pnpm lint` | ESLint |
 | `pnpm test` | Vitest unit/component tests |
 | `pnpm test:watch` | Vitest watch mode |
-| `pnpm test:e2e` | Playwright e2e (starts `pnpm dev` unless `PLAYWRIGHT_BASE_URL` is set) |
+| `pnpm test:e2e` | Playwright e2e |
+| `pnpm db:push` | Push Drizzle schema to SQLite |
+| `pnpm db:seed` | Reseed demo data |
+
+## Project layout
+
+- `src/db/` — Drizzle schema, client, seed
+- [`src/domain`](./src/domain) — pure case state machine, wage safeguards, policy snapshot, work-authorization lists, and worker checklist (no I/O). Specs: [`docs/domain.md`](./docs/domain.md), [`docs/case-state-machine.md`](./docs/case-state-machine.md). `types.ts` holds the enum constants and JSON parsers.
+- `src/auth/` — iron-session, `requireUser` / `requireRole` / `requirePortalUser`
+- `src/app/pick` — persona picker
+- `src/app/{client,worker,ops,review}` — role shells; each `layout.tsx` calls `requirePortalUser`
+- `data/uploads/seed/` — committed upload fixtures (other uploads are gitignored)
 
 ## Deploy
 
-Preferred host: [Vercel](https://vercel.com).
-
-```bash
-# one-time
-pnpm dlx vercel login
-
-# from repo root
-pnpm dlx vercel            # preview
-pnpm dlx vercel --prod     # production
-```
-
-Link the GitHub repo in the Vercel dashboard for automatic deploys on push to `main`.
-
-## Project notes
-
-- UI primitives live under `src/components/ui` (shadcn/ui).
-- Domain rules live in [`src/domain`](./src/domain): the case state machine, wage safeguards, policy snapshot, work-authorization lists, and worker checklist. They are pure functions with no I/O. Specs: [`docs/domain.md`](./docs/domain.md), [`docs/case-state-machine.md`](./docs/case-state-machine.md).
-- App routes use the App Router under `src/app`.
-- Unit tests: `src/**/*.{test,spec}.{ts,tsx}`
-- E2E tests: `e2e/`
+Preferred host: [Vercel](https://vercel.com). Ensure `better-sqlite3` native builds are allowed in the environment, and set `SESSION_SECRET`.
 
 ## Factory dry-run
 
-This repo supports an Issue → implement → PR → review factory dry-run. Engineers own one Issue end-to-end and spawn a reviewer on the open PR before merge.
+Engineers own one Issue end-to-end and spawn a reviewer on the open PR before merge.
