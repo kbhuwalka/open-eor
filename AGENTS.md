@@ -1,52 +1,47 @@
 # SpaceXAI Demo — Cursor factory
 
-GitHub **Issues and Pull Requests** are the source of truth. Issue bodies, PR descriptions, and review comments are the durable record — not chat history.
+GitHub **Issues and PRs** are the source of truth.
 
 ## Roles
 
 | Role | Who | Owns |
 | --- | --- | --- |
-| **Project coordinator (EM)** | This Cursor Project chat | Backlog, dispatch, merge gates. No product code edits. |
-| **Engineer workers** | Parallel Cursor workers (`CreateAgent`) | One Issue → one branch/worktree → one PR → verify |
-| **Reviewer (optional)** | A worker or a human | PR review; binary verdict; follow-up Issues if needed |
+| **EM** | This Project chat | Backlog, dispatch engineers, merge gates. No product code. |
+| **Engineer** | Cloud worker | Issue end-to-end: plan → implement → PR → spawn reviewer → fix → `submit-pr.sh` |
+| **Reviewer** | Worker spawned by engineer | Approve / Request changes via `submit-review.sh` (not Bugbot) |
 
-The Project chat **is** the EM. There is no separate orchestrator agent, Codex runtime, or `/orchestrate` command.
+Cursor already gives cloud workers a working branch from `main` — stay on it. PR base is `main`.
 
 ## Standards
 
-- `standards/engineering.md` — layered architecture, DI, correctness-by-construction
-- `standards/testing.md` — behavior-spec tests; colocated `__tests__/`
-
-Read these before non-trivial edits. Reviewers enforce **[Required]** sections.
+- `standards/engineering.md`
+- `standards/testing.md`
 
 ## Stack
 
-- **App:** Next.js App Router, TypeScript, shadcn/ui — repo root
-- **Package manager:** pnpm
-- **Unit / component tests:** Vitest (+ RTL) in sibling `__tests__/` next to source
-- **E2E:** Playwright (`e2e/`, `pnpm test:e2e`)
+Next.js (repo root), pnpm, Node 24. Unit/component tests in `__tests__/`; e2e in `e2e/`.
 
-## Local verify
-
-Before opening or updating a PR, from repo root:
+## Verify
 
 ```bash
-pnpm lint
-pnpm test
-pnpm build
-pnpm test:e2e
+pnpm lint && pnpm test && pnpm build
+# e2e optional in agent; CI is merge gate
 ```
-
-## Conventions
-
-- **One Issue → one branch → one PR.** Do not bundle unrelated Issues.
-- Prefer branch names: `cursor/issue-<n>-short-title`
-- Link the Issue in the PR; close via merge when acceptance criteria are met.
-- Keep PRs reviewable; prefer small, sequential PRs over mega-diffs.
 
 ## Skills / scripts
 
-Skills and ops scripts are **TBD**. Until then: follow this file, `standards/`, and the linked Issue/PR.
+| Skill | Role |
+| --- | --- |
+| `implement-issue` | Engineer loop (plan + feedback folded in) |
+| `review-pr` | Binary review via `submit-review.sh` |
+
+```bash
+bash scripts/issue.sh <n> [--verify-unblocked|…]
+bash scripts/submit-review.sh --pr <n> --verdict APPROVED|CHANGES_REQUESTED …
+bash scripts/submit-pr.sh --pr <n>   # Lint / Unit Tests / Production Build / End-to-End Tests → merge
+```
+
+One Issue → one PR. `Closes #<n>`. CI always-on (no label gate).
 
 <!-- BEGIN:nextjs-agent-rules -->
 
