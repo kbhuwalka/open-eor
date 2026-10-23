@@ -14,8 +14,8 @@
 #   - Each --finding must have 5 pipe-separated fields
 #   - Each --followup must have 2 pipe-separated fields: issue number and description
 #
-# Posts exactly one pull-request comment (`gh pr comment`). The verdict is
-# text in that comment. This script does not approve, request changes, or
+# Posts exactly one pull-request comment (`gh pr comment`). The first line
+# of that comment is the verdict word. This script does not approve, request changes, or
 # dismiss reviews, and it does not call `gh pr review` or the pull-request
 # review API. Prints VERDICT:<result> to stdout. Exits 0 when the comment
 # is posted.
@@ -58,8 +58,8 @@ while [[ $# -gt 0 ]]; do
 submit-review.sh — Post a structured PR review as one comment.
 
 This adds a single pull-request comment and exits 0 when that comment is
-posted. The verdict word (APPROVED or CHANGES_REQUESTED) is text in the
-comment body. It does not approve, request changes, or dismiss reviews.
+posted. The first line of the comment is the verdict word (APPROVED or
+CHANGES_REQUESTED). It does not approve, request changes, or dismiss reviews.
 It does not call the pull-request review API.
 
 USAGE
@@ -128,7 +128,10 @@ else
   VERDICT_BADGE="❌ **VERDICT: CHANGES_REQUESTED**"
 fi
 
-BODY="# Code Review
+# First line is the verdict word the engineer acts on.
+BODY="${VERDICT}
+
+# Code Review
 
 ${VERDICT_BADGE}
 

@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
-# submit-pr.sh — Validate, watch required Quality Gates checks, and optionally merge a PR.
+# submit-pr.sh — Watch required Quality Gates checks, then squash-merge.
 #
 # CI runs automatically on pull_request (no label retrigger). Required checks:
 #   Lint / Unit Tests / Production Build / End-to-End Tests
+#
+# The merge gate is those checks (and a clean merge). This script does not
+# read reviewDecision, an APPROVED review state, or pull-request reviews,
+# and it does not call the pull-request review API. GH_TOKEN is the PR
+# author and cannot self-approve. The engineer's signal to run this script
+# is the reviewer comment whose first line is APPROVED.
 
 set -euo pipefail
 
@@ -36,7 +42,8 @@ DESCRIPTION
      skips watching and goes directly to merge (unless --no-merge).
   3. Otherwise watches the Quality Gates workflow run for the PR head
      until required checks complete (or timeout).
-  4. Squash-merges the PR on success unless --no-merge is given.
+  4. Squash-merges the PR when those checks pass, unless --no-merge is given.
+     A GitHub pull-request review approval is not required.
   5. Closes the linked issue if --issue is provided or the PR body
      contains a "Closes #N" / "Fixes #N" / "Resolves #N" reference.
 
@@ -44,6 +51,8 @@ DESCRIPTION
     Lint, Unit Tests, Production Build, End-to-End Tests
 
   There is no label-gated CI. Pushing/updating a PR triggers Quality Gates.
+  This script does not require reviewDecision or an APPROVED review state,
+  and it does not call the pull-request review API.
 
 OPTIONS
   --pr <number>        PR number to submit (required)
@@ -145,7 +154,7 @@ do_merge() {
   if ! output=$(gh pr merge "$PR" --squash 2>&1); then
     echo "✗ PR #${PR} — merge failed" >&2
     echo "  ${output}" >&2
-    echo "  Check the PR for branch protection or review requirements." >&2
+    echo "  Required CI checks must be green. This script does not wait for a GitHub review approval." >&2
     exit 1
   fi
   echo "✓ PR #${PR} — merged"

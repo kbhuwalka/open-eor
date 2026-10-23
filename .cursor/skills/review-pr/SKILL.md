@@ -22,9 +22,9 @@ CRITICAL = broken behavior / data loss / security / regression. IMPORTANT = arch
 
 ## Submit
 
-Post the written verdict with `submit-review.sh`. That script adds **one PR comment** and exits 0. The verdict word in the comment is the review record. It does not approve, request changes, or dismiss a GitHub review.
+Post one comment with `submit-review.sh` and stop. The script exits 0 when the comment is posted. The first line of the comment is the verdict word `APPROVED` or `CHANGES_REQUESTED`. The owning engineer reads that line and, on `APPROVED`, runs `submit-pr.sh`.
 
-Do **not** run `gh pr review`, `gh api` review mutations (`addPullRequestReview`, approve, request-changes, dismiss), or `submit-pr.sh`. The engineer reads the comment and submits after `APPROVED`.
+Do not call `gh pr review`, `addPullRequestReview`, or any approve, request-changes, or dismiss mutation. Do not run `submit-pr.sh`.
 
 ```bash
 bash scripts/submit-review.sh --pr <n> \
