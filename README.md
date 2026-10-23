@@ -55,3 +55,7 @@ Link the GitHub repo in the Vercel dashboard for automatic deploys on push to `m
 - App routes use the App Router under `src/app`.
 - Unit tests: `src/**/*.{test,spec}.{ts,tsx}`
 - E2E tests: `e2e/`
+
+## Factory dry-run
+
+This repo supports an Issue → implement → PR → review factory dry-run. Engineers own one Issue end-to-end and spawn a reviewer on the open PR before merge.
