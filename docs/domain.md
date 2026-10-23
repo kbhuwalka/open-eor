@@ -25,7 +25,7 @@ Assumptions:
 | CaseEvent | case | any transition | Append-only timeline |
 | WorkerProfile | worker | `worker` | Checklist stub JSON |
 
-## 2.1 Hire creation
+### 2.1 Hire creation
 
 - H1. `createHire` (by `client_hr`) MUST target a `users` row with `role = worker` in the same client company that has **no existing** `onboarding_cases` row; otherwise `DomainError("WORKER_ALREADY_ASSIGNED")`. One worker ↔ at most one case for the demo. The seed therefore ships an unassigned worker (`user_worker_2`, [data-model.md](./data-model.md) §5) so a hire can be created cold.
 - H2. `createHire` emits `hire_created`; the case starts in `draft_hire`. The `/client/hires/new` action calls `createHire` then `submitHire` in one transaction.
@@ -208,7 +208,7 @@ Vitest under `src/domain/__tests__/` MUST prove:
 1. W1 table above exactly (all eight combinations).
 2. `RejectReason`: each non-`OTHER` code accepted with and without note; `OTHER` without note → `INVALID_REJECT_REASON`.
 3. Checklist: each step individually missing yields that step id in `missing`; all present → `complete: true`; C2 ordering — complete checklist with `{list_a, list_b}` → `INVALID_LIST_COMBO`, incomplete checklist with `{list_a, list_b}` → `CHECKLIST_INCOMPLETE`.
-7. H1: `createHire` for a worker who already has a case → `WORKER_ALREADY_ASSIGNED`; A3: second `signAgreement` → `AGREEMENT_ALREADY_SIGNED`.
 4. Wage: `724` hourly in `TX` refused; `725` accepted; `1649` hourly in `CA` refused; salary `1_508_000` (= 725 × 2080) in `TX` accepted; `1_507_999` refused; `0` and negative refused.
 5. Snapshot: output is frozen (mutation throws in strict mode); same input + same `now` → deep-equal output; `eorFeeCents` and `benefits.electives` derived correctly for both packages.
 6. Event types used by `src/domain` are a subset of §9 (compile-time union; a test asserts the union matches the table).
+7. H1: `createHire` for a worker who already has a case → `WORKER_ALREADY_ASSIGNED`; A3: second `signAgreement` → `AGREEMENT_ALREADY_SIGNED`.

@@ -28,7 +28,7 @@ Exactly these eight literals. They are stored as `onboarding_cases.state` text a
 ## 3. Rules
 
 - S1. A case is created in `draft_hire` together with its `HireRequest` and MUST NOT be created in any other state (seed data is the only exception and MUST still be reachable by legal transitions from `draft_hire`).
-- S2. Every transition MUST be validated by `assertTransition({ from, to, actorRole })` in the domain before any write. The function throws `DomainError("ILLEGAL_TRANSITION")` for an unknown edge and `DomainError("FORBIDDEN_ROLE")` for a known edge with the wrong actor.
+- S2. Every transition MUST be validated by `assertTransition({ from, to, actorRole })` in the domain before any write. The function throws `DomainError("ILLEGAL_TRANSITION")` for an unknown edge and `DomainError("FORBIDDEN_ROLE")` for a known edge with the wrong actor. Named operations (S3) check the actor's role before the edge, so a wrong-role call on a non-existent edge reports `FORBIDDEN_ROLE`; only `assertTransition` called directly reports `ILLEGAL_TRANSITION` first.
 - S3. Transitions are applied by named operations (§5), never by setting `state` directly. Each operation MUST: check actor role → check preconditions → compute new state → return `{ nextState, event }`. Persistence applies both atomically ([architecture.md](./architecture.md) §4).
 - S4. `ready_for_payroll` is terminal: no outgoing edges.
 - S5. Self-transitions are illegal. Skipping states is illegal.

@@ -38,7 +38,7 @@ client_companies 1──* hire_requests *──1 users (worker)   [+ created_by,
 hire_requests   1──1 onboarding_cases *──1 users (worker) [+ assigned_ops?, assigned_reviewer?]
 onboarding_cases 1──* case_documents *──1 users (uploaded_by)
 onboarding_cases 1──* case_events    *──1 users? (actor)
-users (worker)  1──1 worker_profiles *──1 onboarding_cases?
+users (worker)  1──0..1 worker_profiles *──1 onboarding_cases?   [row upserted on first checklist save]
 ```
 
 ## 4. Tables
