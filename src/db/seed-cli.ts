@@ -1,8 +1,8 @@
-import { createDb } from "./client"
-import { assertSeedWorld } from "./seed"
+import { count } from "drizzle-orm"
 
-const db = createDb()
-const summary = assertSeedWorld(db)
-console.log(
-  `Seed OK — ${summary.userCount} users, pending case ${summary.pendingCaseId}`
-)
+import { getDb } from "./client"
+import { users } from "./schema"
+
+const db = getDb()
+const [{ value }] = db.select({ value: count() }).from(users).all()
+console.log(`Seed OK — ${value} users`)

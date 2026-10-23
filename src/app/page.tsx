@@ -1,14 +1,11 @@
 import { Suspense } from "react"
 import { redirect } from "next/navigation"
 
-import { getSessionUser, ROLE_HOME } from "@/auth"
+import { getSessionUser, homePathForSession } from "@/auth"
 
 async function HomeRedirect() {
   const user = await getSessionUser()
-  if (user) {
-    redirect(ROLE_HOME[user.role])
-  }
-  redirect("/pick")
+  redirect(homePathForSession(user))
   return null
 }
 

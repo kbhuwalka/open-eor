@@ -1,14 +1,16 @@
 /**
- * Fake-auth session via iron-session signed cookie (userId only).
- * No passwords / IdP. Does not own role ACL predicates — see acl.ts.
+ * Persona session: iron-session signed httpOnly cookie `eor_session`
+ * carrying only `userId`. Tampering or an unknown id resolves to no session.
  */
-import { getIronSession, type SessionOptions } from "iron-session"
+import { getIronSession, type CookieStore, type SessionOptions } from "iron-session"
 import { cookies } from "next/headers"
 import { eq } from "drizzle-orm"
 
 import { getDb, users, type AppDatabase, type UserRole } from "@/db"
 
 export const SESSION_COOKIE_NAME = "eor_session"
+
+const DEV_SESSION_SECRET = "eor-demo-session-secret-not-for-production-32b"
 
 export type SessionData = {
   userId?: string
@@ -19,6 +21,8 @@ export type SessionUser = {
   email: string
   displayName: string
   role: UserRole
+  clientCompanyId: string | null
+  providerId: string | null
 }
 
 export const ROLE_HOME: Record<UserRole, string> = {
@@ -29,18 +33,16 @@ export const ROLE_HOME: Record<UserRole, string> = {
 }
 
 export function getSessionPassword(
-  env: NodeJS.ProcessEnv = process.env
+  env: Record<string, string | undefined> = process.env
 ): string {
-  // iron-session requires ≥32 characters
-  return (
-    env.SESSION_SECRET ??
-    "eor-demo-session-secret-not-for-production-32b"
-  )
+  const password = env.SESSION_SECRET ?? DEV_SESSION_SECRET
+  if (password.length < 32) {
+    throw new Error("SESSION_SECRET must be at least 32 characters")
+  }
+  return password
 }
 
-export function sessionOptions(
-  password = getSessionPassword()
-): SessionOptions {
+export function sessionOptions(password = getSessionPassword()): SessionOptions {
   return {
     cookieName: SESSION_COOKIE_NAME,
     password,
@@ -53,12 +55,17 @@ export function sessionOptions(
   }
 }
 
-export async function getIronSessionStore(
-  cookieStore?: Awaited<ReturnType<typeof cookies>>,
+export async function readSessionUserId(deps: {
+  cookies: CookieStore
   password?: string
-) {
-  const store = cookieStore ?? (await cookies())
-  return getIronSession<SessionData>(store, sessionOptions(password))
+}): Promise<string | undefined> {
+  const session = await getIronSession<SessionData>(
+    deps.cookies,
+    sessionOptions(deps.password)
+  )
+  return typeof session.userId === "string" && session.userId.length > 0
+    ? session.userId
+    : undefined
 }
 
 export function loadUserById(
@@ -72,12 +79,12 @@ export function loadUserById(
     email: row.email,
     displayName: row.displayName,
     role: row.role,
+    clientCompanyId: row.clientCompanyId,
+    providerId: row.providerId,
   }
 }
 
-/**
- * Resolve session user from a plain userId + lookup (testable without cookies).
- */
+/** Resolve a session user from an already-unsealed id. Unknown ids are no session. */
 export function resolveUserFromSessionData(deps: {
   userId: string | undefined
   loadUserById: (id: string) => SessionUser | null
@@ -89,11 +96,38 @@ export function resolveUserFromSessionData(deps: {
 export async function getSessionUser(deps?: {
   db?: AppDatabase
   password?: string
+  cookies?: CookieStore
 }): Promise<SessionUser | null> {
-  const session = await getIronSessionStore(undefined, deps?.password)
+  const store = deps?.cookies ?? (await cookies())
+  const userId = await readSessionUserId({
+    cookies: store,
+    password: deps?.password,
+  })
   const db = deps?.db ?? getDb()
   return resolveUserFromSessionData({
-    userId: session.userId,
+    userId,
     loadUserById: (id) => loadUserById(db, id),
   })
+}
+
+export function homePathForSession(user: SessionUser | null): string {
+  if (!user) return "/pick"
+  return ROLE_HOME[user.role]
+}
+
+export async function savePersonaSession(userId: string): Promise<void> {
+  const session = await getIronSession<SessionData>(
+    await cookies(),
+    sessionOptions()
+  )
+  session.userId = userId
+  await session.save()
+}
+
+export async function destroyPersonaSession(): Promise<void> {
+  const session = await getIronSession<SessionData>(
+    await cookies(),
+    sessionOptions()
+  )
+  session.destroy()
 }

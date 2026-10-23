@@ -1,13 +1,12 @@
 /**
- * Role ACL helpers for the EOR demo.
+ * Role gate for the persona session.
  *
- * Document bytes: never served to `client_hr`. `eor_reviewer` and `eor_ops`
- * may read; download routes land in later Issues — this module only exposes
- * the predicate.
+ * Document-byte predicates are owned by the integration issue (acl §4).
+ * This module only decides whether a resolved user may enter a role.
  */
 import type { UserRole } from "@/db"
 
-import type { SessionUser } from "./session"
+import { ROLE_HOME, type SessionUser } from "./session"
 
 export class AuthError extends Error {
   readonly code: "unauthenticated" | "forbidden"
@@ -17,11 +16,6 @@ export class AuthError extends Error {
     this.name = "AuthError"
     this.code = code
   }
-}
-
-/** True when role may read work-auth / document bytes. */
-export function canAccessDocumentBytes(role: UserRole): boolean {
-  return role === "eor_reviewer" || role === "eor_ops"
 }
 
 export function requireRole(
@@ -40,9 +34,15 @@ export function requireRole(
   return user
 }
 
-export function isRoleAllowed(
+/**
+ * Portal guard decision (acl F2). Null redirect means the user may render.
+ * Missing session goes to `/pick`; a wrong role goes to that role's home.
+ */
+export function portalAccess(
   user: SessionUser | null,
-  ...roles: UserRole[]
-): boolean {
-  return Boolean(user && roles.includes(user.role))
+  role: UserRole
+): { ok: true; user: SessionUser } | { ok: false; redirectTo: string } {
+  if (!user) return { ok: false, redirectTo: "/pick" }
+  if (user.role !== role) return { ok: false, redirectTo: ROLE_HOME[user.role] }
+  return { ok: true, user }
 }

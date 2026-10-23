@@ -4,29 +4,35 @@ import { eq } from "drizzle-orm"
 import { redirect } from "next/navigation"
 
 import { getDb, users, USER_ROLES, type UserRole } from "@/db"
-import { getIronSessionStore, ROLE_HOME } from "./session"
+
+import {
+  destroyPersonaSession,
+  ROLE_HOME,
+  savePersonaSession,
+} from "./session"
 
 function isUserRole(value: string): value is UserRole {
   return (USER_ROLES as readonly string[]).includes(value)
 }
 
-/** Set signed session cookie for a seeded persona and redirect home. */
+/**
+ * Establish the persona session. This is the login, so it does not call
+ * requireRole — there is no session yet. Unknown ids redirect to `/pick`
+ * (fail closed) instead of throwing.
+ */
 export async function pickPersona(userId: string): Promise<void> {
   const db = getDb()
   const row = db.select().from(users).where(eq(users.id, userId)).get()
   if (!row || !isUserRole(row.role)) {
-    throw new Error("Unknown persona")
+    redirect("/pick")
   }
 
-  const session = await getIronSessionStore()
-  session.userId = row.id
-  await session.save()
+  await savePersonaSession(row.id)
   redirect(ROLE_HOME[row.role])
 }
 
-/** Clear session and return to persona picker (switcher). */
+/** Clear the session cookie and return to the persona picker. */
 export async function clearPersona(): Promise<void> {
-  const session = await getIronSessionStore()
-  session.destroy()
+  await destroyPersonaSession()
   redirect("/pick")
 }

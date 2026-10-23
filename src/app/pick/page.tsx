@@ -3,7 +3,7 @@ import { redirect } from "next/navigation"
 
 import { pickPersona } from "@/auth/actions"
 import { getSessionUser, ROLE_HOME } from "@/auth"
-import { getDb, users, type UserRole } from "@/db"
+import { getDb, listPersonas, type UserRole } from "@/db"
 
 const ROLE_LABEL: Record<UserRole, string> = {
   client_hr: "Client HR",
@@ -25,10 +25,10 @@ async function PersonaGrid() {
     redirect(ROLE_HOME[sessionUser.role])
   }
 
-  const personas = getDb().select().from(users).all()
+  const personas = listPersonas(getDb())
 
   return (
-    <ul className="grid w-full max-w-3xl grid-cols-2 gap-6 sm:grid-cols-4">
+    <ul className="grid w-full max-w-5xl grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-5">
       {personas.map((persona) => {
         const initials = persona.displayName
           .split(" ")

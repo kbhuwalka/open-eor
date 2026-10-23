@@ -1,65 +1,88 @@
 import { describe, expect, it } from "vitest"
 
-import {
-  AuthError,
-  canAccessDocumentBytes,
-  isRoleAllowed,
-  requireRole,
-} from "../acl"
-import type { SessionUser } from "../session"
+import { AuthError, portalAccess, requireRole } from "../acl"
+import { ROLE_HOME, type SessionUser } from "../session"
+import type { UserRole } from "@/db"
 
-const clientHr: SessionUser = {
-  id: "user_client_hr",
-  email: "hr@acme.example",
-  displayName: "Alex Harper",
-  role: "client_hr",
+function persona(
+  id: string,
+  role: UserRole,
+  tenant: { clientCompanyId: string | null; providerId: string | null }
+): SessionUser {
+  return {
+    id,
+    email: `${id}@example`,
+    displayName: id,
+    role,
+    clientCompanyId: tenant.clientCompanyId,
+    providerId: tenant.providerId,
+  }
 }
 
-const reviewer: SessionUser = {
-  id: "user_eor_reviewer",
-  email: "review@northwind.example",
-  displayName: "Riley Chen",
-  role: "eor_reviewer",
-}
+const client = persona("user_client_hr", "client_hr", {
+  clientCompanyId: "client_1",
+  providerId: null,
+})
+const worker = persona("user_worker", "worker", {
+  clientCompanyId: "client_1",
+  providerId: null,
+})
+const ops = persona("user_eor_ops", "eor_ops", {
+  clientCompanyId: null,
+  providerId: "provider_1",
+})
+const reviewer = persona("user_eor_reviewer", "eor_reviewer", {
+  clientCompanyId: null,
+  providerId: "provider_1",
+})
 
-const ops: SessionUser = {
-  id: "user_eor_ops",
-  email: "ops@northwind.example",
-  displayName: "Sam Ortiz",
-  role: "eor_ops",
-}
+const people = [client, worker, ops, reviewer]
 
 describe("requireRole", () => {
-  it("passes when role is allowed", () => {
-    expect(requireRole(clientHr, "client_hr")).toEqual(clientHr)
-    expect(isRoleAllowed(reviewer, "eor_reviewer")).toBe(true)
+  it("lets each role pass for itself and rejects the other three", () => {
+    for (const user of people) {
+      expect(requireRole(user, user.role)).toEqual(user)
+      for (const other of people) {
+        if (other.role === user.role) continue
+        expect(() => requireRole(user, other.role)).toThrow(AuthError)
+        try {
+          requireRole(user, other.role)
+        } catch (error) {
+          expect(error).toBeInstanceOf(AuthError)
+          expect((error as AuthError).code).toBe("forbidden")
+        }
+      }
+    }
   })
 
-  it("fails unauthenticated when session is missing", () => {
+  it("rejects a missing session as unauthenticated", () => {
     expect(() => requireRole(null, "client_hr")).toThrow(AuthError)
     try {
-      requireRole(null, "client_hr")
+      requireRole(null, "worker")
     } catch (error) {
       expect((error as AuthError).code).toBe("unauthenticated")
     }
   })
-
-  it("fails forbidden when role is wrong", () => {
-    expect(() => requireRole(ops, "eor_reviewer")).toThrow(AuthError)
-    try {
-      requireRole(ops, "eor_reviewer")
-    } catch (error) {
-      expect((error as AuthError).code).toBe("forbidden")
-    }
-    expect(isRoleAllowed(ops, "eor_reviewer")).toBe(false)
-  })
 })
 
-describe("document ACL", () => {
-  it("allows reviewer and ops; denies client_hr and worker", () => {
-    expect(canAccessDocumentBytes("eor_reviewer")).toBe(true)
-    expect(canAccessDocumentBytes("eor_ops")).toBe(true)
-    expect(canAccessDocumentBytes("client_hr")).toBe(false)
-    expect(canAccessDocumentBytes("worker")).toBe(false)
+describe("portalAccess", () => {
+  it("sends a missing session to /pick", () => {
+    expect(portalAccess(null, "client_hr")).toEqual({
+      ok: false,
+      redirectTo: "/pick",
+    })
+  })
+
+  it("sends a wrong role to that role's home and admits the matching role", () => {
+    for (const user of people) {
+      expect(portalAccess(user, user.role)).toEqual({ ok: true, user })
+      for (const other of people) {
+        if (other.role === user.role) continue
+        expect(portalAccess(user, other.role)).toEqual({
+          ok: false,
+          redirectTo: ROLE_HOME[user.role],
+        })
+      }
+    }
   })
 })

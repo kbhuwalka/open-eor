@@ -1,16 +1,13 @@
 /**
- * Session boundary: requireUser / requireRole against the signed cookie.
- * Portal layouts use requirePortalUser for redirect-based guards.
+ * Session boundary used by pages and later server actions.
+ * Portal layouts call `requirePortalUser` for redirect guards.
  */
 import { redirect } from "next/navigation"
 
 import type { AppDatabase, UserRole } from "@/db"
-import { isRoleAllowed, requireRole as assertRoles, AuthError } from "./acl"
-import {
-  getSessionUser,
-  ROLE_HOME,
-  type SessionUser,
-} from "./session"
+
+import { AuthError, portalAccess, requireRole as assertRoles } from "./acl"
+import { getSessionUser, type SessionUser } from "./session"
 
 export async function requireUser(deps?: {
   db?: AppDatabase
@@ -23,25 +20,17 @@ export async function requireUser(deps?: {
   return user
 }
 
-export async function requireRole(
-  ...roles: UserRole[]
-): Promise<SessionUser> {
+export async function requireRole(...roles: UserRole[]): Promise<SessionUser> {
   const user = await getSessionUser()
   return assertRoles(user, ...roles)
 }
 
-/** Layout/page guard: missing session → /pick; wrong role → that role's home. */
-export async function requirePortalUser(
-  ...allowedRoles: UserRole[]
-): Promise<SessionUser> {
+/** No session → `/pick`. Wrong role → that role's home. */
+export async function requirePortalUser(role: UserRole): Promise<SessionUser> {
   const user = await getSessionUser()
-  if (!user) {
-    redirect("/pick")
-  }
-  if (!isRoleAllowed(user, ...allowedRoles)) {
-    redirect(ROLE_HOME[user.role])
-  }
-  return user
+  const decision = portalAccess(user, role)
+  if (!decision.ok) redirect(decision.redirectTo)
+  return decision.user
 }
 
 export { AuthError }

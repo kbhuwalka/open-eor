@@ -17,7 +17,7 @@ Normative product and engineering specs live under [`docs/`](./docs/README.md) a
 
 ## Database + seed
 
-SQLite file: `data/eor.sqlite` (gitignored). Schema is applied on first open; seed runs automatically when the DB has no users.
+SQLite file: `data/eor.sqlite` (gitignored). Override the path with `DATABASE_FILE`. Schema is applied on first open; seed runs automatically when `users` is empty. `pnpm db:seed` sets `FORCE_SEED=1` and wipes + reseeds.
 
 ```bash
 pnpm install
@@ -26,9 +26,9 @@ pnpm db:seed    # wipe+reseed demo world (sets FORCE_SEED)
 pnpm dev
 ```
 
-Open [http://localhost:3000/pick](http://localhost:3000/pick) and choose a persona. Session is an **iron-session** signed httpOnly cookie with `userId` (override secret via `SESSION_SECRET`, ≥32 chars).
+Open [http://localhost:3000](http://localhost:3000). With no session it redirects to `/pick`. Choosing a persona sets an **iron-session** signed httpOnly cookie named `eor_session` that carries `userId` only (override the signing secret with `SESSION_SECRET`, at least 32 characters). Switch persona clears the cookie.
 
-Seeded personas: Client HR · Worker · EOR Ops · EOR Reviewer. Mid-funnel case `case_pending_1` is in `pending_review` with a fixture under `data/uploads/seed/`.
+Seeded personas: Client HR (Alex Harper), Worker (Jordan Lee, owns `case_pending_1`), Worker (Taylor Kim, no case), EOR Ops, EOR Reviewer. `hire_1` is `submitted` with a policy snapshot. The case is in `pending_review` with a List A fixture at `data/uploads/seed/list-a-passport.png`.
 
 ## Scripts
 
@@ -47,10 +47,11 @@ Seeded personas: Client HR · Worker · EOR Ops · EOR Reviewer. Mid-funnel case
 ## Project layout
 
 - `src/db/` — Drizzle schema, client, seed
-- `src/auth/` — iron-session, `requireUser` / `requireRole`, ACL helpers
-- `src/app/pick` — Netflix-style persona picker
-- `src/app/{client,worker,ops,review}` — role shell stubs with guards
-- `data/uploads/seed/` — committed upload fixtures
+- `src/domain/types.ts` — JSON column parsers (`parsePolicySnapshot`, `parseI9Attestation`, …)
+- `src/auth/` — iron-session, `requireUser` / `requireRole` / `requirePortalUser`
+- `src/app/pick` — persona picker
+- `src/app/{client,worker,ops,review}` — role shells; each `layout.tsx` calls `requirePortalUser`
+- `data/uploads/seed/` — committed upload fixtures (other uploads are gitignored)
 
 ## Deploy
 
