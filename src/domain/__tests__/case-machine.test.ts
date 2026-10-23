@@ -457,6 +457,22 @@ describe("illegal transitions", () => {
       "FORBIDDEN_ROLE",
     )
   })
+
+  it("checks ownership before state, so a non-owner on an illegal state is FORBIDDEN_ROLE", () => {
+    expectDomainError(
+      () =>
+        workerSubmitForReview({
+          actorRole: "worker",
+          actorUserId: "user_worker_2",
+          caseWorkerUserId: "user_worker",
+          from: "draft_hire",
+          checklist: { ...COMPLETE, personalJson: null },
+          documents: LIST_A_AND_B,
+          previousSubmissionNo: 0,
+        }),
+      "FORBIDDEN_ROLE",
+    )
+  })
 })
 
 describe("transition matrix", () => {
@@ -622,6 +638,17 @@ describe("actor separation", () => {
 
 describe("documents, notes, and stale decisions", () => {
   it("uploads only for the owning worker in a mutable state", () => {
+    const awaiting = uploadDocument({
+      actorRole: "worker",
+      actorUserId: "user_worker",
+      caseWorkerUserId: "user_worker",
+      from: "awaiting_worker",
+      documentId: "doc_1",
+      kind: "list_a",
+    })
+    expect(awaiting.nextState).toBe("awaiting_worker")
+    expect(awaiting.event.type).toBe("document_uploaded")
+
     const uploaded = uploadDocument({
       actorRole: "worker",
       actorUserId: "user_worker",
