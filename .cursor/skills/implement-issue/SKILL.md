@@ -15,7 +15,7 @@ Cursor already checked out a working branch from `main` — stay on it. PR base 
 2. **Plan** if non-mechanical (below)
 3. **Implement** + `pnpm lint && pnpm test && pnpm build` (e2e optional; CI is merge gate)
 4. **Push + open PR** to `main` with `Closes #<n>`; fill the PR template
-5. **Spawn a reviewer** (point at this PR + `.cursor/skills/review-pr`). EM need not.
+5. **Spawn a reviewer** (point at this PR + `.cursor/skills/review-pr`). EM need not. The reviewer records `APPROVED` or `CHANGES_REQUESTED` as a PR comment via `submit-review.sh`. That comment is the verdict. It is not a GitHub Approve or Request changes review.
 6. On **CHANGES_REQUESTED:** address findings (below), push, spawn a fresh reviewer
 7. On **APPROVED:** `bash scripts/submit-pr.sh --pr <n>`
 

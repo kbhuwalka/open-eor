@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/submit-review.sh — Submit a structured code review via gh Approve / Request changes.
+# scripts/submit-review.sh — Post a structured code review as a PR comment.
 #
 # Usage:
 #   bash scripts/submit-review.sh --pr <number> \
@@ -14,20 +14,27 @@
 #   - Each --finding must have 5 pipe-separated fields
 #   - Each --followup must have 2 pipe-separated fields: issue number and description
 #
-# Posts the review with `gh pr review` (--approve or --request-changes) so the
-# GitHub review state updates. Prints VERDICT:<result> to stdout.
+# Posts exactly one pull-request comment (`gh pr comment`). The verdict is
+# text in that comment. This script does not approve, request changes, or
+# dismiss reviews, and it does not call `gh pr review` or the pull-request
+# review API. Prints VERDICT:<result> to stdout. Exits 0 when the comment
+# is posted.
 
 set -euo pipefail
 
-# Prefer PATH gh; fall back to known local install on this Mac.
-if ! command -v gh >/dev/null 2>&1; then
+# gh is required only when a comment will be posted. --help and validation
+# failures do not need it.
+resolve_gh() {
+  if command -v gh >/dev/null 2>&1; then
+    return 0
+  fi
   if [[ -x /Users/kunal/.local/bin/gh ]]; then
     export PATH="/Users/kunal/.local/bin:$PATH"
-  else
-    echo "error: gh CLI not found on PATH" >&2
-    exit 1
+    return 0
   fi
-fi
+  echo "error: gh CLI not found on PATH" >&2
+  exit 1
+}
 
 PR=""
 VERDICT=""
@@ -48,7 +55,12 @@ while [[ $# -gt 0 ]]; do
     --strength) STRENGTHS+=("$2");     shift 2 ;;
     --help|-h)
       cat <<'EOF'
-submit-review.sh — Submit structured PR review (Approve / Request changes).
+submit-review.sh — Post a structured PR review as one comment.
+
+This adds a single pull-request comment and exits 0 when that comment is
+posted. The verdict word (APPROVED or CHANGES_REQUESTED) is text in the
+comment body. It does not approve, request changes, or dismiss reviews.
+It does not call the pull-request review API.
 
 USAGE
   bash scripts/submit-review.sh --pr <number> \
@@ -113,7 +125,7 @@ done
 if [[ "$VERDICT" == "APPROVED" ]]; then
   VERDICT_BADGE="✅ **VERDICT: APPROVED**"
 else
-  VERDICT_BADGE="❌ **VERDICT: CHANGES REQUESTED**"
+  VERDICT_BADGE="❌ **VERDICT: CHANGES_REQUESTED**"
 fi
 
 BODY="# Code Review
@@ -186,13 +198,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Post review (Approve / Request changes) and report
+# Post the written verdict as one PR comment. Never approve, request
+# changes, or dismiss a review.
 # ---------------------------------------------------------------------------
 
-if [[ "$VERDICT" == "APPROVED" ]]; then
-  gh pr review "$PR" --approve --body "$BODY"
-else
-  gh pr review "$PR" --request-changes --body "$BODY"
-fi
+resolve_gh
+gh pr comment "$PR" --body "$BODY"
 
 echo "VERDICT:${VERDICT}"
