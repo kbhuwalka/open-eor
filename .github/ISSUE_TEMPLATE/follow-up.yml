@@ -1,0 +1,43 @@
+name: Follow-up
+description: Flag unaddressed feedback from a PR that needs review.
+title: "[Follow-up] "
+labels: ["Needs Review"]
+body:
+  - type: input
+    id: source-pr
+    attributes:
+      label: Source PR
+      description: The PR where this feedback originated.
+      placeholder: "#123"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      description: What needs to be done?
+      placeholder: Describe the change or investigation needed.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: Why does this matter? Include the original feedback or comment.
+      placeholder: Reviewer flagged that...
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: What is the risk or consequence of not addressing this?
+      placeholder: Could cause...
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Relevant files, lines, docs, or related issues.
+      placeholder: "- src/lib/..."

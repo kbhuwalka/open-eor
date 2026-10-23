@@ -46,7 +46,26 @@ pnpm test:e2e
 
 ## Skills / scripts
 
-Skills and ops scripts are **TBD**. Until then: follow this file, `standards/`, and the linked Issue/PR.
+Project skills live under `.cursor/skills/` (Cursor loads these automatically):
+
+| Skill | Role |
+| --- | --- |
+| `implement-issue` | Engineer loop: plan gate → implement → PR → reviewer → `submit-pr.sh` |
+| `implementation-plan` | Discovery-first plan + contract/risk matrix before non-mechanical edits |
+| `review-pr` | Exhaustive review → binary verdict → `submit-review.sh` (Approve / Request changes) |
+| `address-feedback` | Treat review findings as failure classes; fix + re-proof |
+| `silent-mode` | Background workers only — no chat noise unless blocked/handoff |
+
+Ops scripts (`scripts/`):
+
+```bash
+bash scripts/issue.sh <n> [--verify-unblocked|…]
+bash scripts/worktree.sh create cursor/issue-<n>-short-title   # base: main
+bash scripts/submit-review.sh --pr <n> --verdict APPROVED|CHANGES_REQUESTED …
+bash scripts/submit-pr.sh --pr <n> [--no-merge]               # watches Lint / Unit Tests / Production Build / End-to-End Tests
+```
+
+**EM** = this Project chat (no `/orchestrate` skill). **Reviewer** = Cursor agent via `gh` Approve/Request changes — not Bugbot. CI is always-on on PRs (no `Run Checks` label).
 
 <!-- BEGIN:nextjs-agent-rules -->
 
