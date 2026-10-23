@@ -66,8 +66,8 @@ An agent MUST NOT add any of the above "helpfully". A new capability requires a 
 
 The product is "done" for the demo when all of the following are provable with seed data from a cold start:
 
-1. Four personas can be picked from `/pick`; each lands on its own portal; cross-portal access is refused server-side.
-2. `client_hr` creates a hire; a hire below the wage floor is refused with a clear error; the case appears with a status and a timeline but no document links.
+1. Five seeded users (four roles; two workers) can be picked from `/pick`; each lands on its own portal; cross-portal access is refused server-side.
+2. `client_hr` creates a hire for the unassigned worker (`user_worker_2`); a hire below the wage floor is refused with a clear error; the case appears with a status and a timeline but no document links.
 3. `eor_ops` releases the case to the worker and cannot invoke approve/reject (no UI control and the server action returns `forbidden`).
 4. `worker` cannot submit an incomplete checklist or an invalid List combination; a complete submission moves the case to `pending_review`.
 5. `eor_reviewer` rejects with a reason code; the worker fixes and resubmits; the reviewer approves; `eor_ops` marks ready for payroll.

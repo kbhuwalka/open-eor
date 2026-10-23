@@ -181,7 +181,8 @@ Suggested index: `(case_id, created_at)`.
 | `agreement_1` | client_agreements | `markup_pct = 15`, `signed` |
 | `role_template_1` | role_templates | "Software Engineer", `w2_employee`, `6500` hourly, `CA` |
 | `user_client_hr` | users | Alex Harper, `client_hr`, client `client_1` |
-| `user_worker` | users | Jordan Lee, `worker`, client `client_1` |
+| `user_worker` | users | Jordan Lee, `worker`, client `client_1` — owns `case_pending_1` |
+| `user_worker_2` | users | Taylor Kim, `worker`, client `client_1` — **no case**; target for a cold create-hire demo ([domain.md](./domain.md) H1) |
 | `user_eor_ops` | users | Sam Ortiz, `eor_ops`, provider `provider_1` |
 | `user_eor_reviewer` | users | Riley Chen, `eor_reviewer`, provider `provider_1` |
 | `hire_1` | hire_requests | from `role_template_1`, `standard`, worker `user_worker`, created by `user_client_hr`, `status = submitted`, `policy_snapshot_json` = snapshot built from the above with `markupPct 15` |
@@ -190,7 +191,7 @@ Suggested index: `(case_id, created_at)`.
 | `worker_profile_1` | worker_profiles | all checklist steps complete (so the seeded case is legitimately in `pending_review`) |
 | `evt_hire_created`, `evt_hire_submitted`, `evt_released_worker`, `evt_submitted_review` | case_events | types `hire_created`, `hire_submitted`, `released_to_worker`, `submitted_for_review` (`submissionNo: 1`) |
 
-Seed invariants (tested): 4 users with distinct roles; exactly one case in `pending_review`; the seeded case satisfies `checklistStatus.complete === true` and W1 (`{list_a}`); seed is idempotent.
+Seed invariants (tested): 5 users — exactly one each of `client_hr`, `eor_ops`, `eor_reviewer` and two `worker`; `user_worker_2` has no case; exactly one case in `pending_review`; the seeded case satisfies `checklistStatus.complete === true` and W1 (`{list_a}`); seed is idempotent.
 
 ## 6. JSON column contracts
 
@@ -210,6 +211,7 @@ Applied by the schema Issue #23 when salvaging PR #18, except the first row whic
 | Seed `hire_1.status = "active"` | MUST be `submitted` per §5 / state §7 derivation |
 | Seed `hire_1.policy_snapshot_json = null` | MUST be a valid `PolicySnapshotV1` (built via domain) |
 | Seed lacks `evt_hire_submitted` | Add it |
+| Seed has a single worker | Add `user_worker_2` (no case) so create-hire is demoable |
 | Seed `i9_attestation_json = { attestedCitizen: true }` | MUST match `I9Attestation` shape (`{ status: "citizen", attestedAt }`) |
 | No indexes on `case_documents` / `case_events` | Add suggested indexes (optional for demo scale) |
 
@@ -218,4 +220,4 @@ Applied by the schema Issue #23 when salvaging PR #18, except the first row whic
 1. `src/db/__tests__/seed.test.ts`: all §5 invariants against a temp SQLite file.
 2. Schema test: `CASE_STATES`, `USER_ROLES`, `DOCUMENT_KINDS` imported by schema are the same object identity as the domain exports (prevents drift).
 3. JSON parsers: malformed strings → `null`; valid → typed value (table-driven).
-4. U1 invariant asserted in seed test for all four users.
+4. U1 invariant asserted in seed test for all five users.

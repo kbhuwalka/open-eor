@@ -29,7 +29,7 @@ Exported as `USER_ROLES` (see [architecture.md](./architecture.md) §3.1). Exact
 | --- | --- | --- | --- | --- | --- |
 | Pick persona / switch | ✓ | ✓ | ✓ | ✓ | `pickPersona`, `clearPersona` |
 | List / create role templates | ✓ | ✗ | ✗ | ✗ | `/client/roles` |
-| View agreement + markup | ✓ | ✗ | ✓ (read) | ✗ | `/client/agreement`, ops case detail |
+| View agreement + markup | ✓ | ✗ | ✓ (read) | ✓ (read, via snapshot on case detail) | `/client/agreement`, ops/review case detail |
 | Sign agreement | ✓ | ✗ | ✗ | ✗ | T2 |
 | Create + submit hire | ✓ | ✗ | ✗ | ✗ | `createHire`, T1 |
 | List cases (status + timeline) | ✓ (own client) | own case | ✓ | ✓ | portals |
@@ -50,7 +50,7 @@ Invariants derived from the matrix (each MUST have a test):
 
 - I1. `eor_ops` can never approve or reject. `eor_reviewer` can never release, reopen, mark ready, create hires, or sign.
 - I2. `client_hr` can never receive document bytes, even for its own client's cases.
-- I3. `worker` is scoped to the single case where `onboarding_cases.worker_user_id === session.userId`.
+- I3. `worker` is scoped to the case (zero or one) where `onboarding_cases.worker_user_id === session.userId`; with zero cases `/worker` shows an empty state and every case action is `not_found`.
 
 ## 4. Ownership predicates
 
@@ -60,7 +60,7 @@ Invariants derived from the matrix (each MUST have a test):
 | `sameClient(user, case)` | `user.role === "client_hr" && hire.clientCompanyId === user.clientCompanyId` |
 | `canAccessDocumentBytes(user, doc, case)` | `user.role ∈ {eor_reviewer, eor_ops}` **or** `ownsCase(user, case)` |
 
-`canAccessDocumentBytes(role)` in `src/auth/acl.ts` currently takes only a role; it MUST be extended to the three-argument form (or a sibling predicate added) before any byte-serving route ships.
+Closed PR #18 sketched a role-only `canAccessDocumentBytes(role)`; the implementation MUST use the three-argument form above (a role-only predicate cannot express the worker-owner case).
 
 ## 5. Enforcement rules (MUST)
 
@@ -94,7 +94,7 @@ Rules:
 - R2. Input MUST be validated/narrowed before the domain call; invalid input → `code: "validation"`.
 - R3. `message` is user-safe and actionable ("Hourly wage $7.24 is below the CA floor of $16.50"). `details` carries machine data (`missing`, `floorCents`).
 - R4. On `ok: true` the action MUST `revalidatePath` the affected portal routes so the timeline updates without a hard refresh.
-- R5. Actions MUST NOT accept `state`, `userId`, or `role` from the client. Only ids and user-entered fields.
+- R5. Actions MUST NOT accept the case `state`, the acting user's id, or a `role` from the client; identity comes from the session. Permitted client-supplied values: entity ids (`caseId`, `documentId`, the target `workerUserId` on create-hire, the persona `userId` on `pickPersona`, which *is* the login), user-entered fields, and `submissionNo` for optimistic concurrency ([work-auth-review.md](./work-auth-review.md) V4), which is validated against the database, never trusted.
 
 ## 7. Out of scope
 

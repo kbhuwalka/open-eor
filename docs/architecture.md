@@ -95,9 +95,9 @@ Rules:
 | `/client` | `client_hr` | dashboard: cases (status badge) + CTAs | issue-map #25 |
 | `/client/roles` | `client_hr` | list + create role templates (wage guard) | domain §7 |
 | `/client/agreement` | `client_hr` | markup display; sign if draft | domain §3 |
-| `/client/hires/new` | `client_hr` | create + submit hire | state T1 |
+| `/client/hires/new` | `client_hr` | create + submit hire; worker select lists only unassigned workers | domain H1, state T1 |
 | `/client/cases/[id]` | `client_hr` | status, snapshot summary, timeline, document **metadata** only | acl I2 |
-| `/worker` | `worker` | checklist for own case; uploads; submit | domain §5–6, state T4 |
+| `/worker` | `worker` | checklist for own case (empty state if none); uploads; submit | domain §5–§6, state T4, acl I3 |
 | `/ops` | `eor_ops` | queue with state filter | state T3/T7/T8 |
 | `/ops/cases/[id]` | `eor_ops` | detail: release, reopen, mark ready, note, documents (bytes OK) | acl §3 |
 | `/review` | `eor_reviewer` | queue: `pending_review` only | work-auth-review |

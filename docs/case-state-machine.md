@@ -60,9 +60,9 @@ All functions are pure, in `src/domain/case-machine.ts`, and return `TransitionR
 | --- | --- | --- | --- | --- | --- |
 | T1a | `submitHire` | `client_hr` | `draft_hire → awaiting_agreement` | agreement `status === "draft"`; `assertWageAllowed` passes; snapshot not yet set | `hire_submitted` |
 | T1b | `submitHire` | `client_hr` | `draft_hire → pending_eor_setup` | agreement `status === "signed"`; `assertWageAllowed` passes; snapshot not yet set | `hire_submitted` |
-| T2 | `signAgreement` | `client_hr` | `awaiting_agreement → pending_eor_setup` | agreement currently `draft`; applies to **all** cases of the client in `awaiting_agreement` | `agreement_signed` (one per case) |
+| T2 | `signAgreement` | `client_hr` | `awaiting_agreement → pending_eor_setup` | agreement currently `draft` (else `AGREEMENT_ALREADY_SIGNED`); applies to **all** cases of the client in `awaiting_agreement` (zero cases is fine — the agreement still flips to `signed`) | `agreement_signed` (one per case) |
 | T3 | `opsReleaseToWorker` | `eor_ops` | `pending_eor_setup → awaiting_worker` | — | `released_to_worker` |
-| T4 | `workerSubmitForReview` | `worker` | `awaiting_worker \| changes_requested → pending_review` | actor is the case's `workerUserId`; `checklistStatus.complete`; `isWorkAuthListComboValid(activeKinds)` | `submitted_for_review` (`submissionNo` = previous + 1) |
+| T4 | `workerSubmitForReview` | `worker` | `awaiting_worker \| changes_requested → pending_review` | in order ([domain.md](./domain.md) C2): actor is the case's `workerUserId`; `checklistStatus.complete`; `isWorkAuthListComboValid(activeKinds)` | `submitted_for_review` (`submissionNo` = previous + 1) |
 | T5 | `reviewerReject` | `eor_reviewer` | `pending_review → changes_requested` | valid `RejectReason` ([domain.md](./domain.md) W3) | `work_auth_rejected` |
 | T6 | `reviewerApprove` | `eor_reviewer` | `pending_review → work_auth_approved` | active docs satisfy W1 | `work_auth_approved` |
 | T7 | `opsReopen` | `eor_ops` | `changes_requested → awaiting_worker` | — | `case_reopened` |
@@ -70,7 +70,7 @@ All functions are pure, in `src/domain/case-machine.ts`, and return `TransitionR
 
 `submitHire` additionally returns `snapshot: PolicySnapshotV1` to be persisted with the hire ([domain.md](./domain.md) §8).
 
-Non-transition operations that still write events: `createHire` (`hire_created`, state stays `draft_hire`), `uploadDocument` (`document_uploaded`), `addOpsNote` (`ops_note`). They are role-gated per [acl.md](./acl.md) §3 but do not change `state`.
+Non-transition operations that still write events: `createHire` (`hire_created`, state stays `draft_hire`; precondition [domain.md](./domain.md) H1), `uploadDocument` (`document_uploaded`), `addOpsNote` (`ops_note`). They are role-gated per [acl.md](./acl.md) §3 but do not change `state`.
 
 ## 6. Illegal transitions (must be tested)
 
@@ -86,7 +86,9 @@ Non-transition operations that still write events: `createHire` (`hire_created`,
 | `work_auth_approved → work_auth_approved` (double approve) | `ILLEGAL_TRANSITION` |
 | `ready_for_payroll → *` | `ILLEGAL_TRANSITION` |
 | `worker` submit with `missing.length > 0` | `CHECKLIST_INCOMPLETE` |
-| `worker` submit with `{list_a, list_b}` | `INVALID_LIST_COMBO` |
+| `worker` submit, checklist complete, active docs `{list_a, list_b}` | `INVALID_LIST_COMBO` |
+| `client_hr` second `signAgreement` | `AGREEMENT_ALREADY_SIGNED` |
+| `client_hr` `createHire` for `user_worker` (already has `case_pending_1`) | `WORKER_ALREADY_ASSIGNED` |
 | `eor_reviewer` reject with `OTHER` and empty note | `INVALID_REJECT_REASON` |
 | `worker` submit on a case whose `workerUserId` ≠ actor | `FORBIDDEN_ROLE` |
 
@@ -110,7 +112,7 @@ Cancel/withdraw hire; case reassignment between workers; SLA timers; reviewer as
 Vitest under `src/domain/__tests__/case-machine.test.ts` MUST prove:
 
 1. Happy path: `draft_hire → pending_eor_setup → awaiting_worker → pending_review → work_auth_approved → ready_for_payroll` with a signed agreement, asserting the emitted event type at each step.
-2. Agreement path: `draft_hire → awaiting_agreement → pending_eor_setup` via `submitHire` then `signAgreement`; `signAgreement` on an already-signed agreement is refused.
+2. Agreement path: `draft_hire → awaiting_agreement → pending_eor_setup` via `submitHire` then `signAgreement`; `signAgreement` on an already-signed agreement is refused with `AGREEMENT_ALREADY_SIGNED`.
 3. Reject loop: `pending_review → changes_requested → pending_review → work_auth_approved`; `submissionNo` increments 1 → 2.
 4. Reopen: `changes_requested → awaiting_worker → pending_review`.
 5. Every row of §6.

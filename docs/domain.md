@@ -25,13 +25,18 @@ Assumptions:
 | CaseEvent | case | any transition | Append-only timeline |
 | WorkerProfile | worker | `worker` | Checklist stub JSON |
 
+## 2.1 Hire creation
+
+- H1. `createHire` (by `client_hr`) MUST target a `users` row with `role = worker` in the same client company that has **no existing** `onboarding_cases` row; otherwise `DomainError("WORKER_ALREADY_ASSIGNED")`. One worker ↔ at most one case for the demo. The seed therefore ships an unassigned worker (`user_worker_2`, [data-model.md](./data-model.md) §5) so a hire can be created cold.
+- H2. `createHire` emits `hire_created`; the case starts in `draft_hire`. The `/client/hires/new` action calls `createHire` then `submitHire` in one transaction.
+
 ## 3. Client–EOR agreement and markup
 
 Rules:
 
 - A1. Each client company MUST have exactly one `ClientAgreement`.
 - A2. `markupPct` is an integer percent (`15` = 15%). It MUST be visible wherever comp is shown to `client_hr` (agreement page, hire summary, case detail) as "EOR fee = `markupPct`% of wage".
-- A3. Only `client_hr` MAY sign. Signing sets `status = signed`, `signedAt = now`. Signing is idempotent: signing a signed agreement is a no-op and MUST NOT emit an event.
+- A3. Only `client_hr` MAY sign. Signing sets `status = signed`, `signedAt = now`. Signing an already-signed agreement MUST be refused with `DomainError("AGREEMENT_ALREADY_SIGNED")` and MUST NOT emit an event (the UI hides the control once signed).
 - A4. A hire MAY be submitted before the agreement is signed; its case then waits in `awaiting_agreement` ([case-state-machine.md](./case-state-machine.md) §4). Signing the agreement advances **every** case of that client currently in `awaiting_agreement`.
 - A5. `markupPct` MUST NOT change after `signed` in this demo (no amendment flow).
 
@@ -56,7 +61,7 @@ Rules:
 - W1. Submission readiness requires **List A xor (List B and List C)**:
   - valid: `{list_a}`, `{list_b, list_c}`
   - invalid: `{}`, `{list_b}`, `{list_c}`, `{list_a, list_b}`, `{list_a, list_c}`, `{list_a, list_b, list_c}`
-  Implemented by `isWorkAuthListComboValid(kinds: DocumentKind[]): boolean` in `src/domain/work-auth.ts`. Only the **active** document per kind counts (§5.2).
+  Implemented by `isWorkAuthListComboValid(kinds: DocumentKind[]): boolean` in `src/domain/work-auth.ts`. Only the **active** document per kind counts (§5.1).
 - W2. I-9 attestation is required before submission. Contract:
 
   ```ts
@@ -85,7 +90,7 @@ Rules:
 
   A reject without a code, or `OTHER` without a note, MUST be refused by the domain with error code `INVALID_REJECT_REASON`.
 
-### 5.2 Active documents and supersession
+### 5.1 Active documents and supersession
 
 - W4. `case_documents` rows are append-only. For each `(caseId, kind)` the **active** document is the row with the greatest `createdAt`. Earlier rows are *superseded* and remain for the timeline.
 - W5. Readiness (W1) and review ([work-auth-review.md](./work-auth-review.md)) operate on the active set only.
@@ -98,7 +103,7 @@ Step ids (owned here): `personal`, `i9`, `w4`, `bank`, `benefits_ack`.
 | Step | Complete when | Storage |
 | --- | --- | --- |
 | `personal` | `personalJson.legalName` non-empty and `personalJson.phone` non-empty | `worker_profiles.personal_json` |
-| `i9` | W2 attestation present **and** W1 combo valid on active docs | `worker_profiles.i9_attestation_json` + `case_documents` |
+| `i9` | W2 attestation present (the List A/B/C combination is checked separately by W1, see C2) | `worker_profiles.i9_attestation_json` |
 | `w4` | `w4Json.filingStatus ∈ {"single","married","head_of_household"}` | `worker_profiles.w4_json` |
 | `bank` | `bankJson.last4` matches `^\d{4}$` | `worker_profiles.bank_json` |
 | `benefits_ack` | `benefitsAcked === true` | `worker_profiles.benefits_acked` |
@@ -106,7 +111,7 @@ Step ids (owned here): `personal`, `i9`, `w4`, `bank`, `benefits_ack`.
 Rules:
 
 - C1. `checklistStatus(input): { complete: boolean; missing: StepId[] }` is a pure function in `src/domain/checklist.ts`; it MUST be the only place completeness is computed.
-- C2. Submit-for-review MUST be refused with `CHECKLIST_INCOMPLETE` (payload `missing`) unless `complete === true`.
+- C2. Submit-for-review checks run in this order and stop at the first failure: (1) role and case ownership → `FORBIDDEN_ROLE`; (2) state → `ILLEGAL_TRANSITION`; (3) `checklistStatus.complete` → `CHECKLIST_INCOMPLETE` (payload `missing`); (4) `isWorkAuthListComboValid(activeKinds)` → `INVALID_LIST_COMBO`. A submission with a complete checklist but `{list_a, list_b}` therefore fails with `INVALID_LIST_COMBO`, never `CHECKLIST_INCOMPLETE`.
 - C3. Checklist fields MAY be edited only while the case is in `awaiting_worker` or `changes_requested`.
 
 ## 7. Wage safeguards
@@ -158,7 +163,7 @@ Rules:
 
 ## 9. Timeline event types
 
-Owned here; stored in `case_events` ([data-model.md](./data-model.md) §4). Emission points are in [case-state-machine.md](./case-state-machine.md) §4.
+Owned here; stored in `case_events` ([data-model.md](./data-model.md) §4). Emission points are in [case-state-machine.md](./case-state-machine.md) §5.
 
 | `type` | Actor role | `payload_json` |
 | --- | --- | --- |
@@ -185,7 +190,7 @@ class DomainError extends Error {
   code:
     | "ILLEGAL_TRANSITION" | "FORBIDDEN_ROLE" | "WAGE_BELOW_FLOOR"
     | "CHECKLIST_INCOMPLETE" | "INVALID_LIST_COMBO" | "INVALID_REJECT_REASON"
-    | "AGREEMENT_NOT_SIGNED" | "SNAPSHOT_ALREADY_SET"
+    | "AGREEMENT_ALREADY_SIGNED" | "WORKER_ALREADY_ASSIGNED"
   details?: Record<string, unknown>
 }
 ```
@@ -194,7 +199,7 @@ Server Actions map `DomainError` to the `ActionResult` contract in [acl.md](./ac
 
 ## 11. Out of scope
 
-E-Verify; real state wage tables beyond the three constants; document OCR or expiry parsing; agreement amendments; multiple hires per worker; payroll calculations beyond `eorFeeCents` display.
+E-Verify; real state wage tables beyond the three constants; document OCR or expiry parsing; agreement amendments; more than one case per worker (see H1); payroll calculations beyond `eorFeeCents` display.
 
 ## 12. Verification
 
@@ -202,7 +207,8 @@ Vitest under `src/domain/__tests__/` MUST prove:
 
 1. W1 table above exactly (all eight combinations).
 2. `RejectReason`: each non-`OTHER` code accepted with and without note; `OTHER` without note → `INVALID_REJECT_REASON`.
-3. Checklist: each step individually missing yields that step id in `missing`; all present → `complete: true`.
+3. Checklist: each step individually missing yields that step id in `missing`; all present → `complete: true`; C2 ordering — complete checklist with `{list_a, list_b}` → `INVALID_LIST_COMBO`, incomplete checklist with `{list_a, list_b}` → `CHECKLIST_INCOMPLETE`.
+7. H1: `createHire` for a worker who already has a case → `WORKER_ALREADY_ASSIGNED`; A3: second `signAgreement` → `AGREEMENT_ALREADY_SIGNED`.
 4. Wage: `724` hourly in `TX` refused; `725` accepted; `1649` hourly in `CA` refused; salary `1_508_000` (= 725 × 2080) in `TX` accepted; `1_507_999` refused; `0` and negative refused.
 5. Snapshot: output is frozen (mutation throws in strict mode); same input + same `now` → deep-equal output; `eorFeeCents` and `benefits.electives` derived correctly for both packages.
 6. Event types used by `src/domain` are a subset of §9 (compile-time union; a test asserts the union matches the table).

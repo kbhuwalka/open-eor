@@ -70,7 +70,7 @@ Rules for the EM / coordinator:
 
 | | |
 | --- | --- |
-| Implements | [case-state-machine.md](./case-state-machine.md) §2–§7 · [domain.md](./domain.md) §3 (A3 idempotence), §5–§10 |
+| Implements | [case-state-machine.md](./case-state-machine.md) §2–§7 · [domain.md](./domain.md) §2.1, §3 (A3), §5–§10 |
 | Owns | `src/domain/**` only: `types.ts`, `case-machine.ts`, `wage.ts`, `policy-snapshot.ts`, `work-auth.ts`, `checklist.ts`, `__tests__/` |
 | Must not | Import Next/React/Drizzle/`src/db`; touch schema (enum re-pointing is #20) |
 | Proof | [domain.md](./domain.md) §12 all items · [case-state-machine.md](./case-state-machine.md) §9.1–9.7 (incl. exhaustive matrix test) · [architecture.md](./architecture.md) §9.1 import-direction test |
@@ -90,7 +90,7 @@ Rules for the EM / coordinator:
 | Implements | [architecture.md](./architecture.md) §5 `/client/*` · [domain.md](./domain.md) §3 (A2 markup display, A3 sign), §4 B1, §7 (wage guard on template + hire), §8 P3 · [case-state-machine.md](./case-state-machine.md) T1a/T1b/T2 · [acl.md](./acl.md) I2, F6 · [work-auth-review.md](./work-auth-review.md) §6 client row, O2 |
 | Owns | `src/app/client/**` (pages, `actions.ts`, `__tests__/`) |
 | Calls | `src/server/cases.ts` (`createHire`, `submitHire`, `signAgreement`), `queries.ts`, `DocumentList` metadata mode, `CaseTimeline` |
-| Proof | Action tests: wrong role → `forbidden`; wage `724` → `WAGE_BELOW_FLOOR` with user-safe message; hire with draft agreement → case `awaiting_agreement`, signing advances it; client case page renders no `/api/documents/` URL; reject note hidden, code shown |
+| Proof | Action tests: wrong role → `forbidden`; wage `724` → `WAGE_BELOW_FLOOR` with user-safe message; hire for `user_worker_2` succeeds, hire for `user_worker` → `WORKER_ALREADY_ASSIGNED`; hire with draft agreement → case `awaiting_agreement`, signing advances it; second sign → `AGREEMENT_ALREADY_SIGNED`; client case page renders no `/api/documents/` URL; reject note hidden, code shown |
 
 ### #26 — Worker portal
 
@@ -99,7 +99,7 @@ Rules for the EM / coordinator:
 | Implements | [architecture.md](./architecture.md) §5 `/worker` · [domain.md](./domain.md) §5 W1–W2, W6, §6 C1–C3 · [case-state-machine.md](./case-state-machine.md) T4 · [acl.md](./acl.md) I3 · [work-auth-review.md](./work-auth-review.md) §5 K1–K4 |
 | Owns | `src/app/worker/**` |
 | Calls | `src/server/cases.ts` (`uploadDocument`, `workerSubmitForReview`, checklist save), `documents.ts` via case service, `DocumentList` bytes mode (own case) |
-| Proof | Incomplete submit → `CHECKLIST_INCOMPLETE` with `missing`; `{list_a, list_b}` → `INVALID_LIST_COMBO`; valid submit → `pending_review` + event; re-upload supersedes; non-owner worker → `forbidden`; read-only after approval |
+| Proof | Incomplete submit → `CHECKLIST_INCOMPLETE` with `missing`; complete checklist + `{list_a, list_b}` → `INVALID_LIST_COMBO`; no case → empty state; valid submit → `pending_review` + event; re-upload supersedes; non-owner worker → `forbidden`; read-only after approval |
 
 ### #27 — Ops portal
 
