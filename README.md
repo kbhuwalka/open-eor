@@ -8,6 +8,10 @@ Starter web app for Project SpaceXAI_Demo.
 
 This repo keeps the default/starter UI. Product features are tracked in GitHub Issues.
 
+## Specifications
+
+Normative product and engineering specs live under [`docs/`](./docs/README.md) and are the source of truth for behavior: product overview, domain rules, case state machine, ACL, data model, architecture, work-auth review loop, and the Issue → spec map. Issues cite these paths; a PR that changes behavior updates the owning spec in the same PR.
+
 ## Prerequisites
 
 - Node.js 20+
