@@ -47,7 +47,7 @@ Seeded personas: Client HR (Alex Harper), Worker (Jordan Lee, owns `case_pending
 ## Project layout
 
 - `src/db/` — Drizzle schema, client, seed
-- `src/domain/types.ts` — JSON column parsers (`parsePolicySnapshot`, `parseI9Attestation`, …)
+- [`src/domain`](./src/domain) — pure case state machine, wage safeguards, policy snapshot, work-authorization lists, and worker checklist (no I/O). Specs: [`docs/domain.md`](./docs/domain.md), [`docs/case-state-machine.md`](./docs/case-state-machine.md). `types.ts` holds the enum constants and JSON parsers.
 - `src/auth/` — iron-session, `requireUser` / `requireRole` / `requirePortalUser`
 - `src/app/pick` — persona picker
 - `src/app/{client,worker,ops,review}` — role shells; each `layout.tsx` calls `requirePortalUser`
