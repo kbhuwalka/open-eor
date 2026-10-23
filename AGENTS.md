@@ -6,11 +6,11 @@ GitHub **Issues and Pull Requests** are the source of truth. Issue bodies, PR de
 
 | Role | Who | Owns |
 | --- | --- | --- |
-| **Project coordinator (EM)** | This Cursor Project chat | Backlog, dispatch, merge gates. No product code edits. |
-| **Engineer workers** | Parallel Cursor workers (`CreateAgent`) | One Issue → one branch/worktree → one PR → verify |
-| **Reviewer (optional)** | A worker or a human | PR review; binary verdict; follow-up Issues if needed |
+| **Project coordinator (EM)** | This Cursor Project chat | Backlog, dispatch engineers, merge gates. No product code edits. |
+| **Engineer** | Cursor worker (`CreateAgent`) | One Issue end-to-end: plan → implement → PR → **spawn reviewer** → fix → `submit-pr.sh` |
+| **Reviewer** | Cursor worker spawned by the engineer | Binary Approve / Request changes via `submit-review.sh` (not Bugbot) |
 
-The Project chat **is** the EM. There is no separate orchestrator agent, Codex runtime, or `/orchestrate` command.
+The Project chat **is** the EM. No separate orchestrator skill or Codex `/orchestrate` runtime.
 
 ## Standards
 
@@ -22,49 +22,42 @@ Read these before non-trivial edits. Reviewers enforce **[Required]** sections.
 ## Stack
 
 - **App:** Next.js App Router, TypeScript, shadcn/ui — repo root
-- **Package manager:** pnpm
-- **Unit / component tests:** Vitest (+ RTL) in sibling `__tests__/` next to source
+- **Package manager:** pnpm (`packageManager` pin in `package.json`); Node 24
+- **Unit / component tests:** Vitest (+ RTL) in sibling `__tests__/`
 - **E2E:** Playwright (`e2e/`, `pnpm test:e2e`)
 
 ## Local verify
-
-Before opening or updating a PR, from repo root:
 
 ```bash
 pnpm lint
 pnpm test
 pnpm build
-pnpm test:e2e
+# pnpm test:e2e optional locally; CI is the merge gate
 ```
 
 ## Conventions
 
-- **One Issue → one branch → one PR.** Do not bundle unrelated Issues.
-- Prefer branch names: `cursor/issue-<n>-short-title`
-- Link the Issue in the PR; close via merge when acceptance criteria are met.
-- Keep PRs reviewable; prefer small, sequential PRs over mega-diffs.
+- **One Issue → one branch → one PR**
+- Branch: `cursor/issue-<n>-short-title` (base `main`)
+- Link the Issue (`Closes #<n>`); keep PRs small
 
 ## Skills / scripts
 
-Project skills live under `.cursor/skills/` (Cursor loads these automatically):
+Only two skills under `.cursor/skills/`:
 
 | Skill | Role |
 | --- | --- |
-| `implement-issue` | Engineer loop: plan gate → implement → PR → reviewer → `submit-pr.sh` |
-| `implementation-plan` | Discovery-first plan + contract/risk matrix before non-mechanical edits |
-| `review-pr` | Exhaustive review → binary verdict → `submit-review.sh` (Approve / Request changes) |
-| `address-feedback` | Treat review findings as failure classes; fix + re-proof |
-
-Ops scripts (`scripts/`):
+| `implement-issue` | Engineer owns the Issue; plan + address-feedback folded in; spawns reviewer; runs `submit-pr.sh` after approve |
+| `review-pr` | Reviewer; binary verdict via `submit-review.sh` |
 
 ```bash
 bash scripts/issue.sh <n> [--verify-unblocked|…]
-bash scripts/worktree.sh create cursor/issue-<n>-short-title   # base: main
+bash scripts/worktree.sh create|list|cleanup …
 bash scripts/submit-review.sh --pr <n> --verdict APPROVED|CHANGES_REQUESTED …
-bash scripts/submit-pr.sh --pr <n> [--no-merge]               # watches Lint / Unit Tests / Production Build / End-to-End Tests
+bash scripts/submit-pr.sh --pr <n>   # waits Lint / Unit Tests / Production Build / End-to-End Tests → merge
 ```
 
-**EM** = this Project chat (no `/orchestrate` skill). **Reviewer** = Cursor agent via `gh` Approve/Request changes — not Bugbot. CI is always-on on PRs (no `Run Checks` label).
+CI is always-on for PRs (no label gate). On this Mac, ensure `PATH` includes `~/.local/bin` for `gh`.
 
 <!-- BEGIN:nextjs-agent-rules -->
 
