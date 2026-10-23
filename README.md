@@ -56,6 +56,7 @@ Link the GitHub repo in the Vercel dashboard for automatic deploys on push to `m
 ## Project notes
 
 - UI primitives live under `src/components/ui` (shadcn/ui).
+- Domain rules live in [`src/domain`](./src/domain): the case state machine, wage safeguards, policy snapshot, work-authorization lists, and worker checklist. They are pure functions with no I/O. Specs: [`docs/domain.md`](./docs/domain.md), [`docs/case-state-machine.md`](./docs/case-state-machine.md).
 - App routes use the App Router under `src/app`.
 - Unit tests: `src/**/*.{test,spec}.{ts,tsx}`
 - E2E tests: `e2e/`
