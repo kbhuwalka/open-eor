@@ -2,7 +2,7 @@
 
 ## 1. Purpose and assumptions
 
-This spec owns persistence: tables, columns, foreign keys, enum literals, JSON column shapes, and deterministic seed ids. It is implemented with Drizzle ORM on SQLite in `src/db/schema.ts` (PR #18 / Issue #11). Where PR #18 and this document differ, this document wins and the delta is listed in §8.
+This spec owns persistence: tables, columns, foreign keys, enum literals, JSON column shapes, and deterministic seed ids. It is implemented with Drizzle ORM on SQLite in `src/db/schema.ts` (Issue #23). Closed PR #18 is a salvageable starting point; where it and this document differ, this document wins and the delta is listed in §8.
 
 Assumptions:
 
@@ -200,13 +200,13 @@ All JSON columns are stored as `text`. Parsing MUST go through a narrowing funct
 
 Migrations history (schema is pushed, not versioned); soft deletes; multi-currency; PII encryption; full-text search; storing file bytes in the database.
 
-## 8. Known deltas vs PR #18 (`src/db/schema.ts`, `src/db/seed.ts`)
+## 8. Known deltas vs closed PR #18 (`src/db/schema.ts`, `src/db/seed.ts`)
 
-To be reconciled by the integration Issue ([issue-map.md](./issue-map.md)), not by #11:
+Applied by the schema Issue #23 when salvaging PR #18, except the first row which is owned by the integration Issue #20 ([issue-map.md](./issue-map.md)):
 
 | Delta | Required change |
 | --- | --- |
-| Enum constants defined in `src/db/schema.ts` | Move to `src/domain/types.ts`; schema imports them |
+| Enum constants defined in `src/db/schema.ts` | **#20:** move to `src/domain/types.ts`; schema imports them |
 | Seed `hire_1.status = "active"` | MUST be `submitted` per §5 / state §7 derivation |
 | Seed `hire_1.policy_snapshot_json = null` | MUST be a valid `PolicySnapshotV1` (built via domain) |
 | Seed lacks `evt_hire_submitted` | Add it |

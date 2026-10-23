@@ -69,7 +69,7 @@ Invariants derived from the matrix (each MUST have a test):
 - F3. **Row scope.** After role check, actions touching a case MUST apply the §4 predicate for `worker` and `client_hr`.
 - F4. **Domain inside the transaction.** Mutations MUST open one transaction, re-read current `state`, call the domain operation, write the new state + hire status + event, and commit. Never trust state from the form.
 - F5. **Document bytes.** `GET /api/documents/[id]` MUST: `requireUser` → load document + case → `canAccessDocumentBytes` → stream from `storagePath` resolved under the uploads root, refusing any resolved path outside it (`403`). Responses MUST set `Content-Disposition: inline; filename="<fileName>"` and `Cache-Control: private, no-store`.
-- F6. **No byte leakage to client_hr.** Client portal pages MUST NOT render `<a href>`/`<img src>` pointing at `/api/documents/*`. A Playwright assertion checks this (#17).
+- F6. **No byte leakage to client_hr.** Client portal pages MUST NOT render `<a href>`/`<img src>` pointing at `/api/documents/*`. A Playwright assertion checks this (#29).
 - F7. **Session errors are not 500s.** `AuthError("unauthenticated")` → redirect `/pick` for pages, `{ ok:false, code:"unauthenticated" }` for actions. `AuthError("forbidden")` → `403` for route handlers, `{ ok:false, code:"forbidden" }` for actions.
 - F8. **Fail closed.** Unknown `userId` in a valid cookie (e.g. after reseed) is treated as no session.
 - F9. **Seed secret.** `SESSION_SECRET` defaults to a dev constant; production deploys MUST set it (≥ 32 chars). Not a demo blocker.
@@ -115,4 +115,4 @@ Server / action tests (owned per [issue-map.md](./issue-map.md)):
 6. I3: `worker` session submitting for a case it does not own → `forbidden`.
 7. Path traversal: a document row whose `storagePath` resolves outside the uploads root → `403`.
 
-E2E (#17): wrong-persona navigation to each portal redirects; client case page contains no `/api/documents/` URLs.
+E2E (#29): wrong-persona navigation to each portal redirects; client case page contains no `/api/documents/` URLs.

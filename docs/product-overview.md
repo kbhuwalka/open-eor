@@ -72,4 +72,4 @@ The product is "done" for the demo when all of the following are provable with s
 4. `worker` cannot submit an incomplete checklist or an invalid List combination; a complete submission moves the case to `pending_review`.
 5. `eor_reviewer` rejects with a reason code; the worker fixes and resubmits; the reviewer approves; `eor_ops` marks ready for payroll.
 6. `client_hr` sees the final status and never receives document bytes (`/api/documents/*` returns `403`).
-7. The Playwright reject-loop path in [issue-map.md](./issue-map.md) (#17) is green in CI.
+7. The Playwright reject-loop path in [issue-map.md](./issue-map.md) (#29) is green in CI.

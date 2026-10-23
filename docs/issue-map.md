@@ -4,6 +4,8 @@
 
 Maps every GitHub Issue of the prototype to the spec sections it implements, the files it owns, the proof it must ship, and its dependency edges. Engineers read the Issue + the cited sections and nothing else. Dependencies are recorded as GitHub **blocked by / blocking** relationships (managed with `bash scripts/issue.sh <n> --add-blocker …`), and this table mirrors them. Epic: [#21](https://github.com/kbhuwalka/spacexai-demo/issues/21).
 
+History: #11–#17 and PR #18 were filed before the specs existed and were closed as *not planned*; each carries a "Replaced by" comment pointing at the Issue below. PR #18's branch (`cursor/eor-schema-seed-session-711f`) remains a salvage source for #23.
+
 Rules for the EM / coordinator:
 
 - M1. Dispatch an Issue only when `bash scripts/issue.sh <n> --verify-unblocked` exits 0.
@@ -15,36 +17,36 @@ Rules for the EM / coordinator:
 
 ```
 #19 specs ─────────┐
-                   ├──> #12 domain ──┐
-#11 schema/seed ───┼─────────────────┼──> #20 integration ──> #13 client ──┐
-                   │                 │                       #14 worker ──┼──> #17 e2e + polish
-                   └─────────────────┘                       #15 ops ─────┤
-                                                             #16 reviewer ┘
+                   ├──> #24 domain ──┐
+#23 schema/seed ───┼─────────────────┼──> #20 integration ──> #25 client ──┐
+                   │                 │                       #26 worker ──┼──> #29 e2e + polish
+                   └─────────────────┘                       #27 ops ─────┤
+                                                             #28 reviewer ┘
 ```
 
 | Issue | Blocked by | Blocks |
 | --- | --- | --- |
-| #19 Technical specs | — | #12, #20 |
-| #11 Schema, seed, session | — | #20 |
-| #12 Domain (case machine, wage, snapshot, work-auth, checklist) | #19 | #20 |
-| #20 Integration layer (case service, documents, bytes route, shared components) | #11, #12 | #13, #14, #15, #16 |
-| #13 Client portal | #20 | #17 |
-| #14 Worker portal | #20 | #17 |
-| #15 Ops portal | #20 | #17 |
-| #16 Reviewer portal | #20 | #17 |
-| #17 Demo polish + Playwright reject loop | #13, #14, #15, #16 | — |
+| [#19](https://github.com/kbhuwalka/spacexai-demo/issues/19) Technical specs | — | #24 |
+| [#23](https://github.com/kbhuwalka/spacexai-demo/issues/23) Schema, seed, session | — | #20 |
+| [#24](https://github.com/kbhuwalka/spacexai-demo/issues/24) Domain (case machine, wage, snapshot, work-auth, checklist) | #19 | #20 |
+| [#20](https://github.com/kbhuwalka/spacexai-demo/issues/20) Integration layer (case service, documents, bytes route, shared components) | #23, #24 | #25, #26, #27, #28 |
+| [#25](https://github.com/kbhuwalka/spacexai-demo/issues/25) Client portal | #20 | #29 |
+| [#26](https://github.com/kbhuwalka/spacexai-demo/issues/26) Worker portal | #20 | #29 |
+| [#27](https://github.com/kbhuwalka/spacexai-demo/issues/27) Ops portal | #20 | #29 |
+| [#28](https://github.com/kbhuwalka/spacexai-demo/issues/28) Reviewer portal | #20 | #29 |
+| [#29](https://github.com/kbhuwalka/spacexai-demo/issues/29) Demo polish + Playwright reject loop | #25, #26, #27, #28 | — |
 
 ## 3. Waves
 
 | Wave | Issues (parallel) | Why parallel is safe |
 | --- | --- | --- |
-| 0 | #19, #11 | Docs only vs. `src/db` + `src/auth` + shells |
-| 1 | #12 | `src/domain` only; enums defined there, schema imports them ([architecture.md](./architecture.md) §3.1) so order vs #11 does not matter once #20 reconciles |
+| 0 | #19, #23 | Docs only vs. `src/db` + `src/auth` + shells |
+| 1 | #24 | `src/domain` only; enums defined there, schema imports them ([architecture.md](./architecture.md) §3.1) so order vs #23 does not matter once #20 reconciles |
 | 2 | #20 | Single integration owner; prevents four portals from each writing a case service |
-| 3 | #13, #14, #15, #16 | Each owns one `src/app/<portal>/` tree; all call `src/server/*` and shared components from #20 |
-| 4 | #17 | Needs all portals for the cross-persona path |
+| 3 | #25, #26, #27, #28 | Each owns one `src/app/<portal>/` tree; all call `src/server/*` and shared components from #20 |
+| 4 | #29 | Needs all portals for the cross-persona path |
 
-#12 may start as soon as #19 merges (in parallel with #11's PR review). #16 does **not** wait for #14: the seed ships a `list_a` fixture (`doc_list_a_1`) and the bytes route ships in #20.
+#24 may start as soon as #19 merges (in parallel with #23). #28 does **not** wait for #26: the seed ships a `list_a` fixture (`doc_list_a_1`) and the bytes route ships in #20.
 
 ## 4. Issue → specs → ownership → proof
 
@@ -56,15 +58,15 @@ Rules for the EM / coordinator:
 | Owns | `docs/**`, root `README.md` pointer |
 | Proof | Reviewer confirms depth bar per [README.md](./README.md) conventions; names consistent across docs |
 
-### #11 — Drizzle schema, seed, persona session
+### #23 — Drizzle schema, seed, persona session
 
 | | |
 | --- | --- |
-| Implements | [data-model.md](./data-model.md) §2–§5 (as of PR #18; deltas §8 go to #20) · [acl.md](./acl.md) §1–§2, F2, F7–F8 · [architecture.md](./architecture.md) §5 shells |
+| Implements | [data-model.md](./data-model.md) §2–§6, §8 (all rows except enum re-pointing) · [acl.md](./acl.md) §1–§2, F2, F7–F8 · [architecture.md](./architecture.md) §5 shells, §7 env |
 | Owns | `src/db/**`, `src/auth/**`, `src/app/pick`, `src/app/{client,worker,ops,review}/page.tsx` shells, `src/components/{portal-shell,persona-switcher}.tsx`, `data/` |
-| Proof | [acl.md](./acl.md) §8.1–8.2 · [data-model.md](./data-model.md) §9.1 (seed invariants as of #11) |
+| Proof | [acl.md](./acl.md) §8.1–8.2 · [data-model.md](./data-model.md) §9.1, §9.3, §9.4 |
 
-### #12 — Domain: case machine, wage, policy snapshot, work-auth, checklist
+### #24 — Domain: case machine, wage, policy snapshot, work-auth, checklist
 
 | | |
 | --- | --- |
@@ -77,11 +79,11 @@ Rules for the EM / coordinator:
 
 | | |
 | --- | --- |
-| Implements | [architecture.md](./architecture.md) §3.1, §4, §6 · [acl.md](./acl.md) §4, F3–F5, §6 · [case-state-machine.md](./case-state-machine.md) §7, S7 · [work-auth-review.md](./work-auth-review.md) V1–V4 · [data-model.md](./data-model.md) §8 reconciliation |
-| Owns | `src/server/**`, `src/app/api/documents/**`, `src/components/{case-timeline,document-list,state-badge}.tsx`; edits to `src/db/schema.ts`, `src/db/seed.ts` limited to §8 deltas |
-| Proof | [case-state-machine.md](./case-state-machine.md) §9 server part · [acl.md](./acl.md) §8.3–8.7 · [architecture.md](./architecture.md) §9.2–9.4 · [work-auth-review.md](./work-auth-review.md) §9.4 · [data-model.md](./data-model.md) §9 |
+| Implements | [architecture.md](./architecture.md) §3.1, §4, §6 · [acl.md](./acl.md) §4, F3–F5, §6 · [case-state-machine.md](./case-state-machine.md) §7, S7 · [work-auth-review.md](./work-auth-review.md) V1–V4 · [data-model.md](./data-model.md) §8 enum re-pointing + §9.2 |
+| Owns | `src/server/**`, `src/app/api/documents/**`, `src/components/{case-timeline,document-list,state-badge}.tsx`; edits to `src/db/schema.ts` limited to importing enums from `src/domain/types.ts` |
+| Proof | [case-state-machine.md](./case-state-machine.md) §9 server part · [acl.md](./acl.md) §8.3–8.7 · [architecture.md](./architecture.md) §9.2–9.4 · [work-auth-review.md](./work-auth-review.md) §9.4 · [data-model.md](./data-model.md) §9.2 |
 
-### #13 — Client portal
+### #25 — Client portal
 
 | | |
 | --- | --- |
@@ -90,7 +92,7 @@ Rules for the EM / coordinator:
 | Calls | `src/server/cases.ts` (`createHire`, `submitHire`, `signAgreement`), `queries.ts`, `DocumentList` metadata mode, `CaseTimeline` |
 | Proof | Action tests: wrong role → `forbidden`; wage `724` → `WAGE_BELOW_FLOOR` with user-safe message; hire with draft agreement → case `awaiting_agreement`, signing advances it; client case page renders no `/api/documents/` URL; reject note hidden, code shown |
 
-### #14 — Worker portal
+### #26 — Worker portal
 
 | | |
 | --- | --- |
@@ -99,16 +101,16 @@ Rules for the EM / coordinator:
 | Calls | `src/server/cases.ts` (`uploadDocument`, `workerSubmitForReview`, checklist save), `documents.ts` via case service, `DocumentList` bytes mode (own case) |
 | Proof | Incomplete submit → `CHECKLIST_INCOMPLETE` with `missing`; `{list_a, list_b}` → `INVALID_LIST_COMBO`; valid submit → `pending_review` + event; re-upload supersedes; non-owner worker → `forbidden`; read-only after approval |
 
-### #15 — Ops portal
+### #27 — Ops portal
 
 | | |
 | --- | --- |
 | Implements | [architecture.md](./architecture.md) §5 `/ops/*` · [case-state-machine.md](./case-state-machine.md) T3, T7, T8, S6 · [acl.md](./acl.md) I1 · [work-auth-review.md](./work-auth-review.md) §6 ops row, O1 |
 | Owns | `src/app/ops/**` |
 | Calls | `src/server/cases.ts` (`opsReleaseToWorker`, `opsReopen`, `opsMarkReadyForPayroll`, `addOpsNote`), `DocumentList` bytes mode |
-| Proof | Release `pending_eor_setup → awaiting_worker`; reopen; mark ready; `eor_ops` invoking approve/reject actions (imported from #16 or case service directly) → `forbidden`, no event; no approve/reject control in rendered HTML; queue filter by state |
+| Proof | Release `pending_eor_setup → awaiting_worker`; reopen; mark ready; `eor_ops` invoking approve/reject (case service directly) → `forbidden`, no event; no approve/reject control in rendered HTML; queue filter by state |
 
-### #16 — Reviewer portal
+### #28 — Reviewer portal
 
 | | |
 | --- | --- |
@@ -117,34 +119,36 @@ Rules for the EM / coordinator:
 | Calls | `src/server/cases.ts` (`reviewerReject`, `reviewerApprove`), `queries.ts`, `DocumentList` bytes mode, `CaseTimeline` |
 | Proof | [work-auth-review.md](./work-auth-review.md) §9.1–9.3, 9.6; reviewer cannot invoke hire/sign/release actions → `forbidden`; queue lists only `pending_review` oldest first |
 
-### #17 — Demo polish + Playwright reject loop
+### #29 — Demo polish + Playwright reject loop
 
 | | |
 | --- | --- |
 | Implements | [product-overview.md](./product-overview.md) §7 · [work-auth-review.md](./work-auth-review.md) §9 E2E · [acl.md](./acl.md) §8 E2E |
 | Owns | `e2e/**`, cross-portal polish limited to `src/components/portal-shell.tsx`, empty states inside each portal, README "Demo" section |
-| Proof | `pnpm test:e2e` green in CI for `e2e/reject-loop.spec.ts`; wrong-persona redirects for all four portals; seed cold-start path |
+| Proof | `pnpm test:e2e` green in CI for `e2e/reject-loop.spec.ts` and `e2e/portal-guards.spec.ts`; seed cold-start path |
 
 ## 5. Acceptance mapping (spec Verification → owning Issue)
 
 | Spec verification item | Owner |
 | --- | --- |
-| domain.md §12 (all) | #12 |
-| case-state-machine.md §9.1–9.7 | #12 |
+| domain.md §12 (all) | #24 |
+| case-state-machine.md §9.1–9.7 | #24 |
 | case-state-machine.md §9 server double-apply | #20 |
-| acl.md §8.1–8.3 | #11 (8.1–8.2), #20 (8.3) |
-| acl.md §8.4 (ops forbidden on approve/reject) | #15 (action-level), #20 (service-level) |
+| acl.md §8.1–8.2 | #23 |
+| acl.md §8.3 | #20 |
+| acl.md §8.4 (ops forbidden on approve/reject) | #27 (action-level), #20 (service-level) |
 | acl.md §8.5, §8.7 (bytes route) | #20 |
-| acl.md §8.6 (worker non-owner) | #14 |
-| acl.md §8 E2E | #17 |
-| data-model.md §9 | #11 (initial), #20 (after reconciliation) |
-| architecture.md §9.1 | #12 |
+| acl.md §8.6 (worker non-owner) | #26 |
+| acl.md §8 E2E | #29 |
+| data-model.md §9.1, §9.3, §9.4 | #23 |
+| data-model.md §9.2 | #20 |
+| architecture.md §9.1 | #24 |
 | architecture.md §9.2–9.4 | #20 |
-| work-auth-review.md §9.1–9.3 | #16 |
+| work-auth-review.md §9.1–9.3 | #28 |
 | work-auth-review.md §9.4, 9.6 | #20 |
-| work-auth-review.md §9.5 | #15 |
-| work-auth-review.md §9 E2E | #17 |
-| product-overview.md §7 | #17 (demo oracle) |
+| work-auth-review.md §9.5 | #27 |
+| work-auth-review.md §9 E2E | #29 |
+| product-overview.md §7 | #29 (demo oracle) |
 
 ## 6. Change control
 

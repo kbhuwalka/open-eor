@@ -59,7 +59,7 @@ Follows `standards/engineering.md` (types → behavior → orchestration → com
 
 ### 3.1 Single source for enums
 
-`src/domain/types.ts` exports the constants listed in [data-model.md](./data-model.md) §2. `src/db/schema.ts` MUST import them (`text("state", { enum: CASE_STATES })`). A test asserts identity ([data-model.md](./data-model.md) §9.2). This is what lets Issues #11 and #12 land in either order.
+`src/domain/types.ts` exports the constants listed in [data-model.md](./data-model.md) §2. `src/db/schema.ts` MUST import them (`text("state", { enum: CASE_STATES })`). A test asserts identity ([data-model.md](./data-model.md) §9.2). This is what lets the schema Issue (#23) and the domain Issue (#24) land in either order; #20 performs the re-pointing.
 
 ## 4. Case service and the transaction rule
 
@@ -92,7 +92,7 @@ Rules:
 | --- | --- | --- | --- |
 | `/` | any | redirect → `/pick` or `ROLE_HOME[role]` | acl §5 |
 | `/pick` | any | persona grid; `pickPersona(userId)` action | acl §1 |
-| `/client` | `client_hr` | dashboard: cases (status badge) + CTAs | issue-map #13 |
+| `/client` | `client_hr` | dashboard: cases (status badge) + CTAs | issue-map #25 |
 | `/client/roles` | `client_hr` | list + create role templates (wage guard) | domain §7 |
 | `/client/agreement` | `client_hr` | markup display; sign if draft | domain §3 |
 | `/client/hires/new` | `client_hr` | create + submit hire | state T1 |

@@ -74,7 +74,7 @@ Unit/server (`src/server/__tests__/cases.test.ts`, `src/app/review/__tests__/`):
 5. `eor_ops` calling `approveWorkAuth` / `rejectWorkAuth` → `forbidden`, no event.
 6. Active-set rendering: two `list_a` rows → only the newest is in the active list; the older is marked superseded.
 
-E2E (#17, `e2e/reject-loop.spec.ts`), using seed `case_pending_1`:
+E2E (#29, `e2e/reject-loop.spec.ts`), using seed `case_pending_1`:
 
 1. Pick EOR Reviewer → `/review` shows the case → open → reject `DOC_ILLEGIBLE`.
 2. Switch → Worker → reject reason visible → upload a new List A file → submit.
