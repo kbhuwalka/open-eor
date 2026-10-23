@@ -46,3 +46,12 @@ next-env.d.ts
 
 # IDE
 .idea/
+
+# local SQLite + runtime uploads (seed fixtures under data/uploads/seed/ are committed)
+/data/*.sqlite
+/data/*.sqlite-*
+/data/*.db
+/data/*.db-*
+/data/uploads/**
+!/data/uploads/seed/
+!/data/uploads/seed/**
