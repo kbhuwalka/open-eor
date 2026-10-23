@@ -7,18 +7,18 @@ description: Engineer owns a GitHub Issue end-to-end — plan, implement, PR, sp
 
 Own the Issue until merge (or blocked). App is at **repo root**; **pnpm**; base **`main`**. Standards: `standards/engineering.md`, `standards/testing.md`.
 
+**Default placement: cloud agent** — use your own checkout. Branch off latest `main`. Do **not** run `worktree.sh` in the cloud.
+
 ## Flow
 
 1. **Gate:** `bash scripts/issue.sh <n> --verify-unblocked`
-2. **Worktree:** `bash scripts/worktree.sh create cursor/issue-<n>-short-title` (base `main`)
+2. **Branch:** fetch/update `main`, create `cursor/issue-<n>-short-title` from latest `main`, push to origin
 3. **Plan** when non-mechanical (see below) — inline here, not another skill
-4. **Implement** + local verify: `pnpm lint && pnpm test && pnpm build` (e2e optional locally; CI is the merge gate)
+4. **Implement** + verify: `pnpm lint && pnpm test && pnpm build` (e2e optional in agent env; CI is the merge gate)
 5. **Open PR** to `main` with `Closes #<n>`; fill the PR template
-6. **Spawn a reviewer worker** yourself (EM need not). Point them at this exact worktree/branch and `.cursor/skills/review-pr`
+6. **Spawn a reviewer worker** yourself (EM need not). Point them at this branch (and checkout path) and `.cursor/skills/review-pr`
 7. On **CHANGES_REQUESTED:** address findings (see below), push, spawn a fresh reviewer
 8. On **APPROVED:** `bash scripts/submit-pr.sh --pr <n>` (waits required checks, then squash-merges)
-
-Ensure `PATH` includes `~/.local/bin` for `gh` on this Mac.
 
 ## Plan (non-mechanical only)
 
@@ -46,8 +46,15 @@ Treat each finding as a **failure class**, not a line patch:
 2. Where else the same class can exist in this PR’s scope
 3. Smallest fix that eliminates the class
 4. Add/update proof that would have caught it
-5. Re-run local verify; push; spawn a **fresh** reviewer
+5. Re-run verify; push; spawn a **fresh** reviewer
 
 ## Done when
 
-PR merged via `submit-pr.sh`, worktree cleaned (`worktree.sh cleanup …`), reviewer workers closed.
+PR merged via `submit-pr.sh`, branch cleaned up as appropriate, reviewer workers closed.
+
+## Local Mac optional
+
+Only when running on Kunal’s self-hosted Mac (not cloud): you may isolate with
+`bash scripts/worktree.sh create cursor/issue-<n>-short-title` and later
+`worktree.sh cleanup …`. Ensure `PATH` includes `~/.local/bin` for `gh`. Cloud
+engineers must not treat worktrees as required.

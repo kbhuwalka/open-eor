@@ -39,6 +39,7 @@ pnpm build
 
 - **One Issue → one branch → one PR**
 - Branch: `cursor/issue-<n>-short-title` (base `main`)
+- **Default placement: cloud agent** (own checkout/branch). Worktrees are **Mac-only optional** — cloud engineers do not run `worktree.sh`
 - Link the Issue (`Closes #<n>`); keep PRs small
 
 ## Skills / scripts
@@ -52,12 +53,13 @@ Only two skills under `.cursor/skills/`:
 
 ```bash
 bash scripts/issue.sh <n> [--verify-unblocked|…]
-bash scripts/worktree.sh create|list|cleanup …
 bash scripts/submit-review.sh --pr <n> --verdict APPROVED|CHANGES_REQUESTED …
 bash scripts/submit-pr.sh --pr <n>   # waits Lint / Unit Tests / Production Build / End-to-End Tests → merge
+# Mac-only optional (not for cloud engineers):
+bash scripts/worktree.sh create|list|cleanup …
 ```
 
-CI is always-on for PRs (no label gate). On this Mac, ensure `PATH` includes `~/.local/bin` for `gh`.
+CI is always-on for PRs (no label gate). On Kunal’s Mac, ensure `PATH` includes `~/.local/bin` for `gh`.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

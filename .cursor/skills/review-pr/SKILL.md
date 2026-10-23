@@ -5,7 +5,7 @@ description: Independent PR review. Binary Approve or Request changes via submit
 
 # Review PR
 
-Review the engineer’s **exact** worktree/branch. Do not create or switch branches, or clean up worktrees.
+Review the engineer’s **exact** branch (and checkout/worktree if they used a Mac local). Do not create or switch branches, or clean up worktrees.
 
 Quality bar: `standards/engineering.md` and `standards/testing.md` **[Required]** sections, linked Issue AC, and the PR body (approach / risks / tests / verification).
 
