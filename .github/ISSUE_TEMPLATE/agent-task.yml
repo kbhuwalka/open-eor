@@ -1,0 +1,70 @@
+name: Agent task
+description: Work order for one engineer (outcome, scope, done). Mark blockers with GitHub Issue relationships (blocked by / blocking), not in this form.
+title: "[Task] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Fill required fields before dispatch. Dependencies belong in GitHub Issue relationships (**blocked by** / **blocking**), not as a form field.
+  - type: textarea
+    id: requirement
+    attributes:
+      label: Requirement
+      description: Outcome in one place — what must be true when this Issue is done.
+      placeholder: When done, …
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: Mergeable checklist. Use bullets.
+      placeholder: |
+        - [ ] …
+        - [ ] …
+    validations:
+      required: true
+  - type: textarea
+    id: non-goals
+    attributes:
+      label: Non-goals and boundaries
+      description: What this Issue explicitly does not include (2–5 bullets). Stops tack-on scope.
+      placeholder: |
+        - …
+        - …
+    validations:
+      required: true
+  - type: textarea
+    id: test-responsibilities
+    attributes:
+      label: Test responsibilities
+      description: What behavior proof this Issue owns. Docs-only may say why none.
+      placeholder: |
+        - …
+    validations:
+      required: true
+  - type: textarea
+    id: source-pointers
+    attributes:
+      label: Source / pointers
+      description: Specs, prior Issues, or review leftovers when they exist (optional).
+      placeholder: e.g. From review on #123; standards/engineering.md §…
+    validations:
+      required: false
+  - type: input
+    id: suggested-domain
+    attributes:
+      label: Suggested domain
+      description: EM hint only; engineer may override in the PR (optional).
+      placeholder: e.g. src/components/…
+    validations:
+      required: false
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Constraints, risks, or context only (optional).
+      placeholder: …
+    validations:
+      required: false
