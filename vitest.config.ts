@@ -10,7 +10,6 @@ export default defineConfig({
     include: [
       "src/**/__tests__/**/*.{test,spec}.{ts,tsx}",
       "src/**/*.{test,spec}.{ts,tsx}",
-      "scripts/**/__tests__/**/*.{test,spec}.{ts,tsx}",
     ],
   },
   resolve: {
