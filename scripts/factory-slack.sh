@@ -80,8 +80,9 @@ fi
 
 URL="$(printf '%s' "${FACTORY_SLACK_POSTER_WEBHOOK_URL:-}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 KEY_RAW="$(printf '%s' "${FACTORY_SLACK_POSTER_WEBHOOK_KEY:-}")"
+KEY_TRIMMED="$(printf '%s' "$KEY_RAW" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 
-if [[ -z "$URL" || -z "${KEY_RAW//[$'\r\n[:space:]]/}" ]]; then
+if [[ -z "$URL" || -z "$KEY_TRIMMED" ]]; then
   echo "error: FACTORY_SLACK_POSTER_WEBHOOK_URL and FACTORY_SLACK_POSTER_WEBHOOK_KEY must be set in the cloud environment secrets" >&2
   exit 2
 fi
