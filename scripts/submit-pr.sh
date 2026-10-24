@@ -3,7 +3,7 @@
 #
 # CI runs automatically on pull_request (no label retrigger). Required checks:
 #   Lint / Production Build
-# (Unit + Playwright e2e run locally via the husky pre-commit hook.)
+# (Unit + Playwright e2e run locally via the husky pre-push hook.)
 #
 # Those jobs are decided from Actions workflow runs for the PR head SHA
 # (`gh run list` / `gh run view` on the Quality Gates workflow). This script
@@ -68,7 +68,7 @@ DESCRIPTION
   Required check names (exact):
     Lint, Production Build
 
-  Unit and e2e are not CI jobs; they run in the local husky pre-commit hook.
+  Unit and e2e are not CI jobs; they run in the local husky pre-push hook.
 
   There is no label-gated CI. Pushing/updating a PR triggers Quality Gates.
   If the Actions API returns 403, the script exits 4 (gave up) and reports

@@ -3,7 +3,7 @@
 EOR worker-onboarding demo for Project SpaceXAI_Demo (factory Issue→PR→review).
 
 **Stack:** Next.js App Router + TypeScript + shadcn/ui + **Drizzle + SQLite** + **iron-session**  
-**Tests:** Vitest (unit/component) + Playwright (e2e) locally via husky pre-commit; CI runs Lint + Production Build  
+**Tests:** Vitest (unit/component) + Playwright (e2e) locally via husky pre-push; CI runs Lint + Production Build  
 **Package manager:** pnpm
 
 ## Specifications
@@ -41,13 +41,13 @@ Seeded personas: Client HR (Alex Harper), Worker (Jordan Lee, owns `case_pending
 | `pnpm test` | Vitest unit/component tests |
 | `pnpm test:watch` | Vitest watch mode |
 | `pnpm test:e2e` | Playwright e2e (live specs need a copy database outside the project, see [`e2e/README.md`](./e2e/README.md)) |
-| `pnpm test:precommit` | Vitest then Playwright via `scripts/test-precommit.ts` (husky pre-commit) |
+| `pnpm test:precommit` | Vitest then Playwright via `scripts/test-precommit.ts` (husky pre-push) |
 | `pnpm db:push` | Push Drizzle schema to SQLite |
 | `pnpm db:seed` | Reseed demo data |
 
-## Pre-commit hooks
+## Pre-push hooks
 
-After `pnpm install`, husky installs a **pre-commit** hook that runs `scripts/test-precommit.ts` (same as `pnpm test:precommit`): Vitest, then Playwright, with `CI=true` and a temporary SQLite/uploads tree outside the repo so live specs do not touch `data/eor.sqlite`. Playwright starts the local `next` binary when `PLAYWRIGHT_BASE_URL` is unset; expect several minutes on a full suite. Quality Gates on GitHub Actions only run **Lint** and **Production Build**. Policy details: `scripts/precommit-env.ts`.
+After `pnpm install`, husky installs a **pre-push** hook that runs `scripts/test-precommit.ts` (same as `pnpm test:precommit`): Vitest, then Playwright, with `CI=true` and a temporary SQLite/uploads tree outside the repo so live specs do not touch `data/eor.sqlite`. Runs on `git push` (not every commit). Playwright starts the local `next` binary when `PLAYWRIGHT_BASE_URL` is unset; expect ~15–35+ minutes on a full suite. Quality Gates on GitHub Actions only run **Lint** and **Production Build**. Policy details: `scripts/precommit-env.ts`.
 
 Enable / refresh hooks:
 
@@ -61,11 +61,11 @@ Skip when needed (documented escape hatches):
 
 | Method | Effect |
 | --- | --- |
-| `SKIP=pre-commit git commit …` | Skips this hook (`SKIP=tests` or `SKIP=all` also work) |
-| `HUSKY=0 git commit …` | Disables all husky hooks for that command |
-| `git commit --no-verify` | Git built-in; skips all hooks |
+| `SKIP=pre-push git push …` | Skips this hook (`SKIP=pre-commit`, `tests`, or `all` also work) |
+| `HUSKY=0 git push …` | Disables all husky hooks for that command |
+| `git push --no-verify` | Git built-in; skips all hooks |
 
-Prefer fixing failing tests over skipping. Agents and WIP commits may use an escape hatch; say so in the PR if tests were not run.
+Prefer fixing failing tests over skipping. Agents and WIP pushes may use an escape hatch; say so in the PR if tests were not run.
 
 ## Project layout
 

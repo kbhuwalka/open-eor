@@ -184,8 +184,8 @@ Use Playwright for user flows.
 
 - Use `test.step()` for distinct user actions.
 - Avoid `waitForTimeout`; use assertions, `waitFor`, or `toPass`.
-- E2E runs via `pnpm test:precommit` / husky pre-commit (with unit tests), not
-  in GitHub Actions. Failures should block the commit unless an escape hatch
+- E2E runs via `pnpm test:precommit` / husky pre-push (with unit tests), not
+  in GitHub Actions. Failures should block the push unless an escape hatch
   is used; the PR should note when hooks were skipped for a non-app
   infrastructure issue.
 - Do not extend broad end-to-end flows to cover low-level provider, API, or
@@ -213,9 +213,9 @@ pnpm lint && pnpm test:precommit && pnpm build
 
 `pnpm test:precommit` (`scripts/test-precommit.ts`) owns unit then e2e: binaries
 from `node_modules/.bin`, `CI=true`, and a temp `DATABASE_FILE` / `UPLOADS_ROOT`
-outside the repo (cleaned up on exit). Husky pre-commit runs the same script.
+outside the repo (cleaned up on exit). Husky pre-push runs the same script.
 CI Quality Gates remain Lint + Production Build. If verification or the hook is
-skipped (`SKIP=pre-commit|tests|all`, `HUSKY=0`, or `git commit --no-verify`),
+skipped (`SKIP=pre-push|tests|all`, `HUSKY=0`, or `git push --no-verify`),
 explain why in the PR.
 
 ---

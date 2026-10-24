@@ -20,6 +20,7 @@ describe("shouldSkipPrecommit", () => {
     for (const token of PRECOMMIT_SKIP_TOKENS) {
       expect(shouldSkipPrecommit(token)).toBe(true)
     }
+    expect(shouldSkipPrecommit("lint,pre-push")).toBe(true)
     expect(shouldSkipPrecommit("lint,pre-commit")).toBe(true)
     expect(shouldSkipPrecommit(" tests ")).toBe(true)
   })

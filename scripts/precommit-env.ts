@@ -1,12 +1,12 @@
 /**
- * Policy for the local pre-commit test run (unit then Playwright).
- * Husky `.husky/pre-commit` must honor the same SKIP tokens as {@link shouldSkipPrecommit}.
+ * Policy for the local pre-push test run (unit then Playwright).
+ * Husky `.husky/pre-push` must honor the same SKIP tokens as {@link shouldSkipPrecommit}.
  */
 import path from "node:path"
 import os from "node:os"
 
-/** Comma-separated SKIP values that skip the husky pre-commit hook. */
-export const PRECOMMIT_SKIP_TOKENS = ["pre-commit", "tests", "all"] as const
+/** Comma-separated SKIP values that skip the husky pre-push hook. */
+export const PRECOMMIT_SKIP_TOKENS = ["pre-push", "pre-commit", "tests", "all"] as const
 
 export function shouldSkipPrecommit(skipEnv: string | undefined): boolean {
   if (!skipEnv) return false
@@ -35,7 +35,7 @@ export type PrecommitEnv = {
 }
 
 /**
- * Builds the environment Playwright + Next must share for a safe pre-commit run:
+ * Builds the environment Playwright + Next must share for a safe pre-push run:
  * CI semantics (no reuse of an existing dev server) and a SQLite/uploads tree
  * outside the repo (required by `writeLiveDb` / Turbopack WAL rules).
  */

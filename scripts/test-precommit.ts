@@ -1,6 +1,5 @@
 /**
- * Single owner of the pre-commit unit + e2e run.
- * Invoked by husky and by `pnpm test:precommit`.
+ * Single owner of the local unit + e2e gate (husky pre-push + `pnpm test:precommit`).
  *
  * Uses node_modules/.bin binaries (no pnpm on PATH required), sets CI=true,
  * and runs Playwright against a temp SQLite/uploads tree outside the repo.

@@ -19,7 +19,7 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_BASE_URL
     ? undefined
     : {
-        // Prefer the local next binary so husky/pre-commit need not have pnpm on PATH.
+        // Prefer the local next binary so husky/pre-push need not have pnpm on PATH.
         command: `"${nextBin}" dev --port ${PORT}`,
         url: baseURL,
         reuseExistingServer: !process.env.CI,
