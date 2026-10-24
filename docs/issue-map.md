@@ -11,7 +11,7 @@ History: #11–#17 and PR #18 were filed before the specs existed and were close
 Rules for the EM / coordinator:
 
 - M1. Dispatch an Issue only when `bash scripts/issue.sh <n> --verify-unblocked` exits 0.
-- M2. One Issue → one engineer → one PR → one independent reviewer → `submit-pr.sh`.
+- M2. One Issue → one engineer → one PR → Cursor Automation review (`cursor[bot]`) → `submit-pr.sh`.
 - M3. Issues in the same wave own **disjoint directories** (§4). Two engineers never edit the same file in one wave; shared needs go to the integration Issue or a spec amendment.
 - M4. A PR that needs a rule not in `docs/` stops and requests a spec amendment instead of inventing one.
 

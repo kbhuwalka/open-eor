@@ -9,11 +9,13 @@
 # does not read statusCheckRollup or the Checks API. A 403 from the Actions
 # API is fatal: the token cannot read Actions, and that is not pending CI.
 #
-# The merge gate is those checks (and a clean merge). This script does not
-# read reviewDecision, an APPROVED review state, or pull-request reviews,
-# and it does not call the pull-request review API. GH_TOKEN is the PR
-# author and cannot self-approve. The engineer's signal to run this script
-# is the reviewer comment whose first line is APPROVED.
+# The merge gate is (1) an approving GitHub pull-request review and (2) those
+# CI checks (and a clean merge). The engineer must only run this after the
+# Cursor Automation (`cursor[bot]`) — or another reviewer — has formally
+# approved. CI green alone is not review passed. A first-line comment
+# verdict (APPROVED / CHANGES_REQUESTED) is not required. GH_TOKEN is the
+# PR author and cannot self-approve; another account (typically cursor[bot])
+# must leave the APPROVED review.
 
 set -euo pipefail
 
@@ -44,16 +46,20 @@ USAGE
 
 DESCRIPTION
   1. Checks the PR for merge conflicts (exits 2 if conflicting).
-  2. Decides the four required jobs from the Quality Gates Actions workflow
+  2. Requires a formal GitHub approving review (latest among APPROVED /
+     CHANGES_REQUESTED must be APPROVED). Does not poll for review —
+     one-shot check. Run only after Automation (or another reviewer)
+     has approved.
+  3. Decides the four required jobs from the Quality Gates Actions workflow
      run for the PR head SHA (`gh run list` / `gh run view`). It does not
      read statusCheckRollup or the Checks API.
-  3. If those jobs already succeeded, skips watching and squash-merges
+  4. If those jobs already succeeded, skips watching and squash-merges
      (unless --no-merge).
-  4. If they are still running, or the run has not appeared yet, watches
+  5. If they are still running, or the run has not appeared yet, watches
      the workflow run until they complete (or timeout).
-  5. Squash-merges the PR when those jobs pass, unless --no-merge is given.
-     A GitHub pull-request review approval is not required.
-  6. Closes the linked issue if --issue is provided or the PR body
+  6. Squash-merges the PR when review + those jobs pass, unless --no-merge
+     is given.
+  7. Closes the linked issue if --issue is provided or the PR body
      contains a "Closes #N" / "Fixes #N" / "Resolves #N" reference.
 
   Required check names (exact):
@@ -62,8 +68,6 @@ DESCRIPTION
   There is no label-gated CI. Pushing/updating a PR triggers Quality Gates.
   If the Actions API returns 403, the script exits 1 and reports that the
   token cannot read Actions. That failure is not pending CI.
-  This script does not require reviewDecision or an APPROVED review state,
-  and it does not call the pull-request review API.
 
 OPTIONS
   --pr <number>        PR number to submit (required)
@@ -73,7 +77,7 @@ OPTIONS
 
 EXIT CODES
   0  Checks passed (and PR merged unless --no-merge was given)
-  1  CI failed, timed out, run not found, Actions API forbidden, or merge failed
+  1  No approving review, CI failed, timed out, run not found, Actions API forbidden, or merge failed
   2  PR has merge conflicts — CI was not watched for merge
 
 EXAMPLES
@@ -165,7 +169,7 @@ do_merge() {
   if ! output=$(gh pr merge "$PR" --squash 2>&1); then
     echo "✗ PR #${PR} — merge failed" >&2
     echo "  ${output}" >&2
-    echo "  Required CI checks must be green. This script does not wait for a GitHub review approval." >&2
+    echo "  Required: an approving GitHub review and green Quality Gates checks." >&2
     exit 1
   fi
   echo "✓ PR #${PR} — merged"
@@ -367,16 +371,16 @@ read_check_state() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 1: Check mergeability
+# Step 1: Check mergeability + approving review (one-shot, no poll)
 # ---------------------------------------------------------------------------
 
-echo "PR #${PR} — checking for merge conflicts..."
+echo "PR #${PR} — checking for merge conflicts and approving review..."
 
 BRANCH=""
 HEAD_SHA=""
 MERGEABLE=""
 pr_json=""
-if ! pr_json=$(gh pr view "$PR" --json mergeable,headRefName,headRefOid 2>&1); then
+if ! pr_json=$(gh pr view "$PR" --json mergeable,headRefName,headRefOid,reviews 2>&1); then
   echo "✗ PR #${PR} — could not fetch PR details" >&2
   echo "  ${pr_json}" >&2
   exit 1
@@ -398,6 +402,35 @@ if [[ "$MERGEABLE" == "CONFLICTING" ]]; then
   echo "  Resolve the conflict and push before re-submitting." >&2
   exit 2
 fi
+
+# Latest among APPROVED / CHANGES_REQUESTED must be APPROVED (anyone, e.g. cursor[bot]).
+LATEST_REVIEW_STATE=$(echo "$pr_json" | jq -r '
+  [
+    .reviews[]
+    | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED")
+  ]
+  | sort_by(.submittedAt)
+  | last
+  | .state // "NONE"
+')
+LATEST_REVIEW_AUTHOR=$(echo "$pr_json" | jq -r '
+  [
+    .reviews[]
+    | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED")
+  ]
+  | sort_by(.submittedAt)
+  | last
+  | .author.login // ""
+')
+
+if [[ "$LATEST_REVIEW_STATE" != "APPROVED" ]]; then
+  echo "✗ PR #${PR} — no approving GitHub review" >&2
+  echo "  Latest review state: ${LATEST_REVIEW_STATE}${LATEST_REVIEW_AUTHOR:+ (from ${LATEST_REVIEW_AUTHOR})}" >&2
+  echo "  Wait for the Cursor Automation (or another reviewer) to formally approve," >&2
+  echo "  then re-run. CI green alone is not review passed." >&2
+  exit 1
+fi
+echo "PR #${PR} — approving review from ${LATEST_REVIEW_AUTHOR:-unknown}"
 
 # ---------------------------------------------------------------------------
 # Step 2: Already green?

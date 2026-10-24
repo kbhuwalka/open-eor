@@ -59,4 +59,4 @@ Preferred host: [Vercel](https://vercel.com). Ensure `better-sqlite3` native bui
 
 ## Factory dry-run
 
-Engineers own one Issue end-to-end and spawn a reviewer on the open PR before merge.
+Engineers own one Issue end-to-end. After opening the PR they watch the Cursor Automation (`cursor[bot]`) for a formal GitHub approve / request-changes, then run `scripts/submit-pr.sh`.

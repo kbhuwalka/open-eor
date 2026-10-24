@@ -1,9 +1,11 @@
 ---
 name: review-pr
-description: Independent PR review. Post a binary verdict as a PR comment via submit-review.sh. Not a GitHub Approve or Request changes review. Not Bugbot.
+description: Manual one-off PR review. Post a binary verdict as a PR comment via submit-review.sh. Not the factory happy path (Automation owns that). Not a GitHub Approve or Request changes review. Not Bugbot.
 ---
 
 # Review PR
+
+**Manual one-off only.** The factory happy path uses the Cursor PR review Automation (`cursor[bot]` formal approve / request-changes). Use this skill when explicitly asked to review without the Automation.
 
 Review the PR/branch you’re given. No branch setup.
 

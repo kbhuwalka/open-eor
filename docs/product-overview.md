@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-An enterprise client is **rebuilding its Employer-of-Record (EOR) worker-onboarding application**. The rebuild is produced by a Cursor Cloud Agent factory: GitHub Issue → engineer agent → PR → reviewer agent → merge. This repo holds the rebuilt product slice. The factory is the demo hero; the EOR slice is the demo artifact and must be realistic enough that role, state, and document rules matter.
+An enterprise client is **rebuilding its Employer-of-Record (EOR) worker-onboarding application**. The rebuild is produced by a Cursor Cloud Agent factory: GitHub Issue → engineer agent → PR → Cursor Automation review → merge. This repo holds the rebuilt product slice. The factory is the demo hero; the EOR slice is the demo artifact and must be realistic enough that role, state, and document rules matter.
 
 This document fixes *what* is being built and *how deep*. Behavior is specified in the sibling specs listed in [README.md](./README.md).
 
@@ -15,7 +15,7 @@ This document fixes *what* is being built and *how deep*. Behavior is specified 
 | Authentication | Persona picker, no passwords. Signed session cookie. Real ACL on the server. |
 | Personas | `client_hr`, `worker`, `onboarding_specialist`, `finance` (names owned by [acl.md](./acl.md)) |
 | Hosting | Local SQLite file + local disk uploads. No external services. |
-| Factory | Each Issue is owned end-to-end by one engineer agent; one Issue → one PR; independent reviewer agent gates merge. |
+| Factory | Each Issue is owned end-to-end by one engineer agent; one Issue → one PR; Cursor Automation (`cursor[bot]`) gates merge with a formal GitHub review. |
 
 ## 3. Personas
 
@@ -47,7 +47,7 @@ Normative rules: [domain.md](./domain.md). Tasks and the workflow: [tasks-and-wo
 | --- | --- | --- |
 | Work-auth review loop | Structured reject reasons, rework tasks, document bytes vs status-only views, Finance has no document access, shared timeline | [work-auth-review.md](./work-auth-review.md) |
 | Task engine | A versioned workflow template as data, one generic engine, derived progress, waiting-on, at-risk and person status; wage floor; immutable policy snapshot; Vitest and property-test coverage | [tasks-and-workflow.md](./tasks-and-workflow.md), [domain.md](./domain.md) |
-| Factory path | Issue → PR → reviewer agent → merge, with specs as source of truth | [issue-map.md](./issue-map.md) |
+| Factory path | Issue → PR → Automation review → merge, with specs as source of truth | [issue-map.md](./issue-map.md) |
 
 Everything else (role edit/archive/delete, W-4/bank stubs, benefits ack) is intentionally thin: fields persisted as JSON, minimal validation, no vendor integrations.
 
