@@ -1,6 +1,6 @@
 # End-to-end tests
 
-Playwright specs. `pnpm test:e2e` runs them all; a spec's header says what it needs. The husky **pre-commit** hook runs Vitest then this suite (`pnpm test:precommit`); GitHub Actions no longer runs Playwright. See the README "Pre-commit hooks" section for install and skip (`SKIP` / `HUSKY=0` / `--no-verify`).
+Playwright specs. `pnpm test:e2e` runs them all; a spec's header says what it needs. Local verify / husky pre-commit use `pnpm test:precommit` (`scripts/test-precommit.ts`: `CI=true`, temp `DATABASE_FILE` / `UPLOADS_ROOT` outside the repo). GitHub Actions no longer runs Playwright. See the README "Pre-commit hooks" section for install and skip.
 
 ## Two kinds of spec
 

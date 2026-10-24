@@ -41,13 +41,13 @@ Seeded personas: Client HR (Alex Harper), Worker (Jordan Lee, owns `case_pending
 | `pnpm test` | Vitest unit/component tests |
 | `pnpm test:watch` | Vitest watch mode |
 | `pnpm test:e2e` | Playwright e2e (live specs need a copy database outside the project, see [`e2e/README.md`](./e2e/README.md)) |
-| `pnpm test:precommit` | Vitest then Playwright (same sequence as the git pre-commit hook) |
+| `pnpm test:precommit` | Vitest then Playwright via `scripts/test-precommit.ts` (husky pre-commit) |
 | `pnpm db:push` | Push Drizzle schema to SQLite |
 | `pnpm db:seed` | Reseed demo data |
 
 ## Pre-commit hooks
 
-After `pnpm install`, husky installs a **pre-commit** hook that runs `pnpm test:precommit` (unit tests first, then the full Playwright suite). Playwright starts `pnpm dev` when `PLAYWRIGHT_BASE_URL` is unset; expect several minutes on a full suite. Quality Gates on GitHub Actions only run **Lint** and **Production Build**.
+After `pnpm install`, husky installs a **pre-commit** hook that runs `scripts/test-precommit.ts` (same as `pnpm test:precommit`): Vitest, then Playwright, with `CI=true` and a temporary SQLite/uploads tree outside the repo so live specs do not touch `data/eor.sqlite`. Playwright starts the local `next` binary when `PLAYWRIGHT_BASE_URL` is unset; expect several minutes on a full suite. Quality Gates on GitHub Actions only run **Lint** and **Production Build**. Policy details: `scripts/precommit-env.ts`.
 
 Enable / refresh hooks:
 

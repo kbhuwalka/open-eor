@@ -184,10 +184,10 @@ Use Playwright for user flows.
 
 - Use `test.step()` for distinct user actions.
 - Avoid `waitForTimeout`; use assertions, `waitFor`, or `toPass`.
-- E2E runs in the local husky pre-commit hook (with unit tests), not in
-  GitHub Actions. Failures should block the commit unless an escape hatch
-  is used (`SKIP=pre-commit`, `HUSKY=0`, or `git commit --no-verify`); the
-  PR should note when hooks were skipped for a non-app infrastructure issue.
+- E2E runs via `pnpm test:precommit` / husky pre-commit (with unit tests), not
+  in GitHub Actions. Failures should block the commit unless an escape hatch
+  is used; the PR should note when hooks were skipped for a non-app
+  infrastructure issue.
 - Do not extend broad end-to-end flows to cover low-level provider, API, or
   autosave races. Add narrow product-facing e2e regressions only when the
   behavior must be proven through the browser.
@@ -205,17 +205,18 @@ private-method spies.
 
 ## Local Verification
 
-For most implementation PRs, run:
+For most implementation PRs, run one command:
 
 ```bash
-pnpm lint
-pnpm test:precommit   # unit then e2e (also the husky pre-commit hook)
-pnpm build
+pnpm lint && pnpm test:precommit && pnpm build
 ```
 
-Or rely on the pre-commit hook for unit + e2e and still run `pnpm lint` /
-`pnpm build` (those two remain the CI Quality Gates). If a local verification
-step or the hook is skipped, explain why in the PR implementation record.
+`pnpm test:precommit` (`scripts/test-precommit.ts`) owns unit then e2e: binaries
+from `node_modules/.bin`, `CI=true`, and a temp `DATABASE_FILE` / `UPLOADS_ROOT`
+outside the repo (cleaned up on exit). Husky pre-commit runs the same script.
+CI Quality Gates remain Lint + Production Build. If verification or the hook is
+skipped (`SKIP=pre-commit|tests|all`, `HUSKY=0`, or `git commit --no-verify`),
+explain why in the PR.
 
 ---
 

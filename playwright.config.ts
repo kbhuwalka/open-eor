@@ -1,7 +1,10 @@
+import path from "node:path"
+
 import { defineConfig, devices } from "@playwright/test"
 
 const PORT = Number(process.env.PORT ?? 3000)
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${PORT}`
+const nextBin = path.join(process.cwd(), "node_modules", ".bin", "next")
 
 export default defineConfig({
   testDir: "./e2e",
@@ -16,7 +19,8 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_BASE_URL
     ? undefined
     : {
-        command: "pnpm dev",
+        // Prefer the local next binary so husky/pre-commit need not have pnpm on PATH.
+        command: `"${nextBin}" dev --port ${PORT}`,
         url: baseURL,
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,
