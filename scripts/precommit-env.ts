@@ -2,6 +2,7 @@
  * Policy for the local pre-push test run (unit then Playwright).
  * SKIP is honored only when `scripts/test-precommit.ts` is invoked with `--hook`.
  */
+import fs from "node:fs"
 import path from "node:path"
 import os from "node:os"
 
@@ -67,8 +68,31 @@ export function buildPrecommitEnv(input: PrecommitEnvInput): PrecommitEnv {
   }
 }
 
+/** Unique temp dir outside the project (mkdtemp — safe across pid reuse). */
 export function defaultPrecommitWorkDir(tmpdir: string = os.tmpdir()): string {
-  return path.join(tmpdir, `spacexai-precommit-${process.pid}`)
+  return fs.mkdtempSync(path.join(tmpdir, "spacexai-precommit-"))
+}
+
+/**
+ * Parse `playwright test --list` stdout into unique `e2e/*.spec.ts` paths.
+ * Playwright lists paths relative to `testDir` (`e2e/`).
+ */
+export function specFilesFromPlaywrightList(
+  stdout: string,
+  testDir = "e2e",
+): string[] {
+  const files = new Set<string>()
+  for (const line of stdout.split("\n")) {
+    const match = line.match(/›\s+([^:]+\.spec\.ts):/)
+    if (!match) continue
+    const listed = match[1]!.replaceAll("\\", "/")
+    files.add(
+      listed.startsWith(`${testDir}/`) || listed.startsWith("e2e/")
+        ? listed
+        : path.posix.join(testDir, listed),
+    )
+  }
+  return [...files].sort()
 }
 
 function isPathInside(target: string, root: string): boolean {

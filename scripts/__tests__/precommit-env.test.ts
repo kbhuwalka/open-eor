@@ -1,3 +1,4 @@
+import fs from "node:fs"
 import path from "node:path"
 import os from "node:os"
 
@@ -9,6 +10,7 @@ import {
   defaultPrecommitWorkDir,
   shouldSkipHookRun,
   shouldSkipPrecommit,
+  specFilesFromPlaywrightList,
 } from "../precommit-env"
 
 describe("shouldSkipPrecommit", () => {
@@ -70,9 +72,28 @@ describe("buildPrecommitEnv", () => {
     ).toThrow(/outside the project/)
   })
 
-  it("defaultPrecommitWorkDir is under tmp and includes the pid", () => {
-    const dir = defaultPrecommitWorkDir("/var/tmp")
-    expect(dir.startsWith("/var/tmp/spacexai-precommit-")).toBe(true)
-    expect(dir).toContain(String(process.pid))
+  it("defaultPrecommitWorkDir is a unique mkdtemp under tmp", () => {
+    const tmp = os.tmpdir()
+    const dir = defaultPrecommitWorkDir(tmp)
+    expect(dir.startsWith(path.join(tmp, "spacexai-precommit-"))).toBe(true)
+    expect(fs.existsSync(dir)).toBe(true)
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe("specFilesFromPlaywrightList", () => {
+  it("dedupes paths relative to e2e/ from playwright --list lines", () => {
+    const stdout = `
+Listing tests:
+  [chromium] › home.spec.ts:3:5 › home redirects
+  [chromium] › finance-portal.spec.ts:20:5 › settles
+  [chromium] › home.spec.ts:3:5 › home redirects
+  [chromium] › e2e/task-inbox.spec.ts:10:5 › inbox
+`
+    expect(specFilesFromPlaywrightList(stdout)).toEqual([
+      "e2e/finance-portal.spec.ts",
+      "e2e/home.spec.ts",
+      "e2e/task-inbox.spec.ts",
+    ])
   })
 })
