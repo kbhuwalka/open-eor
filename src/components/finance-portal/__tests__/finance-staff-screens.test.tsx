@@ -330,13 +330,13 @@ describe("InvoicesScreen", () => {
     renderInvoices([unpaid, paid])
     const table = screen.getByRole("table", { name: "Invoices" })
     const headers = within(table).getAllByRole("columnheader")
-    expect(headers.map((th) => th.textContent)).toEqual(["Invoice", "Person", "Client", "Due", "Status", "Amount"])
+    expect(headers.map((th) => th.textContent)).toEqual(["Invoice", "Person", "Due", "Status", "Amount"])
     for (const th of headers) {
       expect(th).toHaveAttribute("scope", "col")
       expect(th).not.toHaveAttribute("aria-sort")
       expect(within(th).queryByRole("button")).toBeNull()
     }
-    expect(headers[5]).toHaveClass("text-right")
+    expect(headers[4]).toHaveClass("text-right")
     expect(table.querySelector("caption")).toHaveClass("sr-only")
   })
 
@@ -347,6 +347,8 @@ describe("InvoicesScreen", () => {
     expect(within(first).getByTestId("invoice-number")).toHaveClass("font-medium")
     expect(within(first).getByTestId("invoice-person")).toHaveTextContent("Maya Park")
     expect(within(first).getByTestId("invoice-client")).toHaveTextContent("Harbor Foods Co.")
+    expect(within(first).getByTestId("invoice-client")).toHaveClass("text-muted-foreground")
+    expect(within(first).getByTestId("invoice-open")).toContainElement(within(first).getByTestId("invoice-client"))
     expect(within(first).getByTestId("invoice-client")).toHaveAttribute("title", "Harbor Foods Co.")
     expect(within(first).getByTestId("invoice-due")).toHaveTextContent(/^Oct 30$/)
     expect(within(first).getByTestId("invoice-due")).not.toHaveClass("text-muted-foreground")
@@ -363,7 +365,7 @@ describe("InvoicesScreen", () => {
 
     for (const row of [first, second, overdue, later]) {
       expect(row).not.toHaveTextContent(/Due |Deposit|Payroll|Oct 5|Oct 23/)
-      expect(row.querySelectorAll("td")).toHaveLength(6)
+      expect(row.querySelectorAll("td")).toHaveLength(5)
     }
     expect(screen.queryByTestId("invoice-detail")).toBeNull()
   })
@@ -414,12 +416,11 @@ describe("InvoicesScreen", () => {
     expect(within(drawer).getByTestId("drawer-number")).toHaveTextContent("INV-2026-0064")
   })
 
-  it("folds Client away first and then Person as the table narrows", () => {
+  it("folds Person away as the table narrows and keeps the client under the number", () => {
     renderInvoices([unpaid])
-    const [, person, client] = screen.getAllByRole("columnheader")
+    const [, person] = screen.getAllByRole("columnheader")
     const row = screen.getByTestId("invoice-row")
-    expect(client).toHaveClass("hidden", "@2xl:table-cell")
-    expect(within(row).getByTestId("invoice-client")).toHaveClass("hidden", "@2xl:table-cell")
+    expect(within(row).getByTestId("invoice-client")).not.toHaveClass("hidden")
     expect(person).toHaveClass("hidden", "@xl:table-cell")
     expect(within(row).getByTestId("invoice-person")).toHaveClass("hidden", "@xl:table-cell")
     expect(screen.getByTestId("invoices-table").closest(".\\@container")).not.toBeNull()

@@ -11,7 +11,7 @@ import { openLiveDb, signInAs } from "./support/live"
  * The four portal homes on the REAL pages, against the seeded database (task-inbox.md): the client
  * Home's "To do", the employee's guided list, the specialist's one filterable list (whole-row
  * links, ui-guidelines C43), Finance's deposits to confirm waiting at the top of the Finance Home's
- * "Waiting on you" (finance-portal.md), the task route's authorization and finishing a task from
+ * "To do" (finance-portal.md), the task route's authorization and finishing a task from
  * each portal's own screen. Ids and counts come from the database, not from names. The
  * tests that change data run serially at the end so the read-only ones never share a task with them.
  *
@@ -325,7 +325,7 @@ test.describe("specialist home", () => {
 })
 
 test.describe("finance home", () => {
-  test("every deposit to confirm waits at the top of Waiting on you, its row opening the payment", async ({ page, baseURL }) => {
+  test("every deposit to confirm waits at the top of To do, its row opening the payment", async ({ page, baseURL }) => {
     const db = await openLiveDb(page)
     const queued = roleTasks(db, "finance")
     expect(queued.length).toBeGreaterThan(0)
@@ -352,7 +352,7 @@ test.describe("finance home", () => {
 
     const paymentId = toConfirm[0].paymentId!
     const row = page.locator(`[data-testid=waiting-row][data-payment-id="${paymentId}"]`)
-    await expect(row.getByTestId("waiting-detail")).toHaveText(/^Deposit · starts /)
+    await expect(row).toHaveAttribute("data-deposit", "true")
     await row.getByTestId("waiting-open").click()
     await expect(page).toHaveURL(`/finance/payments?open=${paymentId}`)
     await expect(page.getByTestId("payment-drawer").getByTestId("payment-reference")).toHaveText(paymentId)

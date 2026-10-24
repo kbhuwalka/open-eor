@@ -1,6 +1,6 @@
 "use client"
 
-import { Bar, BarChart, LabelList, Tooltip, XAxis, YAxis, type TooltipContentProps } from "recharts"
+import { Bar, BarChart, Tooltip, XAxis, YAxis, type TooltipContentProps } from "recharts"
 
 import {
   CHART_FILL,
@@ -23,14 +23,12 @@ import {
 import { formatIsoRange } from "@/lib/finance-format"
 import { formatCents, formatCompactCents } from "@/lib/format"
 
-import { barValueLabel } from "./bar-value-label"
-
 const CONFIG = {
-  billed: { label: "Billed", tone: "brand" },
-  collected: { label: "Collected", tone: "positive" },
+  collected: { label: "Collected", tone: "brand" },
+  outstanding: { label: "Not yet collected", tone: "brandSoft" },
 } satisfies ChartConfig
 
-type Datum = BilledCollectedPoint & { label: string }
+type Datum = BilledCollectedPoint & { label: string; outstandingCents: number }
 
 export type BilledVsCollectedChartProps = {
   /** Pay periods oldest first; the last `maxPeriods` are drawn. */
@@ -41,15 +39,17 @@ export type BilledVsCollectedChartProps = {
   takeaway?: string
   emptyMessage?: string
   className?: string
+  /** `section` is the Finance Home's: no box, the title and takeaway as a section head (`ChartFrame`). */
+  variant?: "card" | "section"
 }
 
 function tooltipRows(point: BilledCollectedPoint): ChartTooltipRow[] {
   const rows: ChartTooltipRow[] = [
-    { key: "billed", value: formatCents(point.billedCents) },
+    { key: "billed", label: "Billed", value: formatCents(point.billedCents) },
     { key: "collected", value: formatCents(point.collectedCents) },
   ]
   if ((point.inFlightCents ?? 0) > 0) rows.push({ key: "inFlight", label: "In flight", value: formatCents(point.inFlightCents ?? 0) })
-  rows.push({ key: "gap", label: "Gap", value: formatCents(point.billedCents - point.collectedCents), strong: true })
+  rows.push({ key: "outstanding", value: formatCents(point.billedCents - point.collectedCents), strong: true })
   return rows
 }
 
@@ -60,9 +60,10 @@ function renderTooltip({ active, payload }: TooltipContentProps) {
 }
 
 /**
- * Two bars per pay period, invoiced (brand) and settled (positive), over the service period on
- * the x axis. Hover or the arrow keys (after tabbing to the plot) show the period's exact figures;
- * a visually hidden table carries them for screen readers.
+ * One bar per pay period, as tall as what was invoiced: the part settled in the brand colour and the
+ * part not yet collected in its tint, over the service period on the x axis. Hover or the arrow
+ * keys (after tabbing to the plot) show the period's exact figures; a visually hidden table carries
+ * them for screen readers.
  */
 export function BilledVsCollectedChart({
   periods,
@@ -71,44 +72,51 @@ export function BilledVsCollectedChart({
   takeaway,
   emptyMessage = "Nothing billed in these pay periods yet.",
   className,
+  variant = "card",
 }: BilledVsCollectedChartProps) {
   const shown = periods.slice(-maxPeriods)
-  const data: Datum[] = shown.map((period) => ({ ...period, label: shortPeriodLabel(period.start, period.end) }))
+  const data: Datum[] = shown.map((period) => ({
+    ...period,
+    label: shortPeriodLabel(period.start, period.end),
+    outstandingCents: Math.max(0, period.billedCents - period.collectedCents),
+  }))
   const sentence = takeaway ?? collectionTakeaway(shown)
   if (!hasBilling(shown)) {
     return (
-      <ChartFrame title={title} takeaway={sentence} className={className}>
+      <ChartFrame title={title} takeaway={sentence} className={className} variant={variant}>
         <ChartEmptyState message={emptyMessage} className="h-60" />
       </ChartFrame>
     )
   }
   return (
-    <ChartFrame title={title} takeaway={sentence} className={className}>
+    <ChartFrame title={title} takeaway={sentence} className={className} variant={variant}>
       <ChartContainer config={CONFIG} className="h-60">
         <BarChart
           data={data}
           width="100%"
           height="100%"
-          margin={{ top: 18, right: 0, bottom: 0, left: 0 }}
-          barCategoryGap="22%"
-          barGap={2}
+          margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
+          barCategoryGap="28%"
           aria-label={`${title}. ${sentence}. Use the arrow keys to read each pay period.`}
         >
           <XAxis dataKey="label" tickLine={false} tickMargin={6} minTickGap={8} />
           <YAxis tickFormatter={(value: number) => formatCompactCents(value)} tickLine={false} axisLine={false} width={52} />
           <Tooltip content={renderTooltip} cursor isAnimationActive={false} />
-          <Bar dataKey="billedCents" name={CONFIG.billed.label} fill={CHART_FILL.brand} radius={[3, 3, 0, 0]} isAnimationActive={false}>
-            <LabelList dataKey="billedCents" content={barValueLabel} />
-          </Bar>
-          <Bar dataKey="collectedCents" name={CONFIG.collected.label} fill={CHART_FILL.positive} radius={[3, 3, 0, 0]} isAnimationActive={false}>
-            <LabelList dataKey="collectedCents" content={barValueLabel} />
-          </Bar>
+          <Bar dataKey="collectedCents" name={CONFIG.collected.label} stackId="period" fill={CHART_FILL.brand} isAnimationActive={false} />
+          <Bar
+            dataKey="outstandingCents"
+            name={CONFIG.outstanding.label}
+            stackId="period"
+            fill={CHART_FILL.brandSoft}
+            radius={[3, 3, 0, 0]}
+            isAnimationActive={false}
+          />
         </BarChart>
       </ChartContainer>
       <ChartLegend config={CONFIG} />
       <ChartDataTable
         caption={`${title} by pay period`}
-        columns={["Pay period", "Billed", "Collected", "In flight", "Gap"]}
+        columns={["Pay period", "Billed", "Collected", "In flight", "Not yet collected"]}
         rows={shown.map((period) => ({
           key: String(period.periodIndex),
           cells: [

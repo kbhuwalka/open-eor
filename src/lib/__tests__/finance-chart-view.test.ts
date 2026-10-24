@@ -57,11 +57,9 @@ describe("collectionTakeaway", () => {
     inFlightCents,
   })
 
-  it("states collected of billed with the share, and money in flight when there is some", () => {
-    expect(collectionTakeaway([period(10_000_000, 8_000_000), period(2_000_000, 0, 500_000)])).toBe(
-      "$80K collected of $120K billed (66%) · $5K in flight",
-    )
-    expect(collectionTakeaway([period(10_000_000, 10_000_000)])).toBe("$100K collected of $100K billed (100%)")
+  it("states the share collected of what was billed, leaving money in flight out", () => {
+    expect(collectionTakeaway([period(10_000_000, 8_000_000), period(2_000_000, 0, 500_000)])).toBe("66% collected of $120K billed")
+    expect(collectionTakeaway([period(10_000_000, 10_000_000)])).toBe("100% collected of $100K billed")
   })
 
   it("says nothing is billed for an empty or all-zero window", () => {

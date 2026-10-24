@@ -10,9 +10,9 @@ import { clientAgeing, type ClientAgeing } from "@/server/finance-insights"
 import { dbFile, openLiveDb, signInAs, writeLiveDb } from "./support/live"
 
 /**
- * Receivables and Billing run on the real pages, as Morgan Reyes (Finance): the figures line, both
- * bar lists and the table agree with the book; a By age row filters the table, By client follows
- * it (a crossfilter) and a second click clears; chips and Clear; a row opens the Invoices drawer;
+ * Receivables and Billing run on the real pages, as Morgan Reyes (Finance): the figures line, By age
+ * and the table agree with the book; a By age row filters the table and a second click clears; the
+ * header's Client filter narrows all three; the age chip and Clear; a row opens the Invoices drawer;
  * the Billing run page shows the Run card and the cadence chart, and running billing issues
  * invoices once, a second press finding nothing to issue; last, with everything owed voided,
  * "Nothing is owed." It WRITES (it makes three payroll invoices due again, then voids what is owed),
@@ -62,11 +62,17 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 })
 
 const byAgeRow = (page: Page, key: string) => page.locator(`[data-testid=by-age] [data-testid=bar-list-row][data-key="${key}"]`)
-const byClientRow = (page: Page, key: string) => page.locator(`[data-testid=by-client] [data-testid=bar-list-row][data-key="${key}"]`)
+
+const clientFilter = (page: Page) => page.getByTestId("receivables-client-filter")
+
+async function pickClient(page: Page, name: string) {
+  await clientFilter(page).click()
+  await page.getByRole("option", { name, exact: true }).click()
+}
 
 /** The `data-cents` of every row of a chart, by key. */
-async function chartCents(page: Page, chart: "by-age" | "by-client"): Promise<Record<string, number>> {
-  const rows = page.locator(`[data-testid=${chart}] [data-testid=bar-list-row]`)
+async function chartCents(page: Page): Promise<Record<string, number>> {
+  const rows = page.locator("[data-testid=by-age] [data-testid=bar-list-row]")
   await expect(rows.first()).toBeVisible()
   return Object.fromEntries(
     await rows.evaluateAll((nodes) => nodes.map((node) => [(node as HTMLElement).dataset.key!, Number((node as HTMLElement).dataset.cents)])),
@@ -83,7 +89,7 @@ async function expectFigures(page: Page, outstanding: number, overdue: number, c
   await expect(table).toHaveAttribute("data-total", String(count))
 }
 
-test("the figures line, both charts and the table agree with the book to the cent", async ({ page }) => {
+test("the figures line, By age and the table agree with the book to the cent", async ({ page }) => {
   await page.goto("/finance/receivables?size=100")
   const expected = await book(page)
   const { bookAgeing } = expected
@@ -94,12 +100,12 @@ test("the figures line, both charts and the table agree with the book to the cen
   await expect(page.getByTestId("receivables-inflight")).toHaveAttribute("data-cents", String(bookAgeing.inFlight.cents))
   await expect(page.getByTestId("receivables-inflight-link")).toHaveAttribute("href", "/finance/payments")
 
-  const byAge = await chartCents(page, "by-age")
+  const byAge = await chartCents(page)
   expect(byAge).toEqual(Object.fromEntries(Object.entries(bookAgeing.buckets).map(([key, total]) => [key, total.cents])))
   expect(sum(byAge)).toBe(bookAgeing.outstandingCents)
-  const byClient = await chartCents(page, "by-client")
-  expect(sum(byClient)).toBe(bookAgeing.outstandingCents)
-  expect(Object.keys(byClient)).toEqual(expected.clients.filter((client) => client.outstandingCents > 0).sort((a, b) => b.outstandingCents - a.outstandingCents).map((client) => client.companyId))
+  await expect(page.getByTestId("by-age")).toContainText(/^By age\d+% overdue of \$/)
+  await expect(page.getByTestId("receivables-count")).toHaveText(String(bookAgeing.invoiceCount))
+  await expect(clientFilter(page)).toContainText("All clients")
 
   const rows = page.getByTestId("receivables-table").getByTestId("invoice-row")
   await expect(rows).toHaveCount(bookAgeing.invoiceCount)
@@ -111,10 +117,10 @@ test("the figures line, both charts and the table agree with the book to the cen
   await shot(page, "receivables")
 })
 
-test("a By age row filters the table, By client follows it, and a second click clears it", async ({ page }) => {
+test("a By age row filters the table, the Client filter narrows it further, and a second click clears the age", async ({ page }) => {
   await page.goto("/finance/receivables")
   const { bookAgeing, clients } = await book(page)
-  const byAgeBefore = await chartCents(page, "by-age")
+  const byAgeBefore = await chartCents(page)
 
   await byAgeRow(page, "current").click()
   await expect(page).toHaveURL(/\/finance\/receivables\?bucket=current$/)
@@ -123,10 +129,8 @@ test("a By age row filters the table, By client follows it, and a second click c
   await expect(byAgeRow(page, "days1to30")).toHaveAttribute("aria-pressed", "false")
   await expectFigures(page, bookAgeing.buckets.current.cents, 0, bookAgeing.buckets.current.count)
   await expect(page.getByTestId("receivables-inflight-link")).toHaveCount(0)
-  expect(await chartCents(page, "by-age")).toEqual(byAgeBefore)
+  expect(await chartCents(page)).toEqual(byAgeBefore)
   const inCurrent = clients.filter((client) => client.buckets.current.cents > 0)
-  await expect(page.locator("[data-testid=by-client] [data-testid=bar-list-row]")).toHaveCount(inCurrent.length)
-  expect(await chartCents(page, "by-client")).toEqual(Object.fromEntries(inCurrent.map((client) => [client.companyId, client.buckets.current.cents])))
   for (const cell of await page.getByTestId("invoice-days-late").evaluateAll((cells) => cells.map((c) => Number((c as HTMLElement).dataset.days)))) {
     expect(cell).toBeLessThanOrEqual(0)
   }
@@ -134,19 +138,19 @@ test("a By age row filters the table, By client follows it, and a second click c
   await shot(page, "receivables-bucket")
 
   const client = inCurrent[0]
-  await byClientRow(page, client.companyId).click()
+  await pickClient(page, client.companyName)
   await expect(page).toHaveURL(`/finance/receivables?bucket=current&client=${client.companyId}`)
+  await expect(clientFilter(page)).toContainText(client.companyName)
   await expectFigures(page, client.buckets.current.cents, 0, client.buckets.current.count)
-  expect(await chartCents(page, "by-age")).toEqual(Object.fromEntries(Object.entries(client.buckets).map(([key, total]) => [key, total.cents])))
-  await expect(page.getByTestId("filter-chip")).toHaveText(["Current", client.companyName])
+  expect(await chartCents(page)).toEqual(Object.fromEntries(Object.entries(client.buckets).map(([key, total]) => [key, total.cents])))
+  await expect(page.getByTestId("filter-chip")).toHaveText(["Current"])
   for (const name of await page.getByTestId("invoice-client").allInnerTexts()) expect(name.trim()).toBe(client.companyName)
   await shot(page, "receivables-both")
 
   await byAgeRow(page, "current").click()
   await expect(page).toHaveURL(`/finance/receivables?client=${client.companyId}`)
   await expectFigures(page, client.outstandingCents, client.overdueCents, client.invoiceCount)
-  await byClientRow(page, client.companyId).focus()
-  await page.keyboard.press("Space")
+  await pickClient(page, "All clients")
   await expect(page).toHaveURL(/\/finance\/receivables$/)
   await expectFigures(page, bookAgeing.outstandingCents, bookAgeing.overdueCents, bookAgeing.invoiceCount)
 
@@ -156,25 +160,29 @@ test("a By age row filters the table, By client follows it, and a second click c
   await page.goto("/finance/receivables?size=25&page=2")
   await byAgeRow(page, "days1to30").click()
   await expect(page).toHaveURL("/finance/receivables?size=25&bucket=1-30")
+  await pickClient(page, client.companyName)
+  await expect(page).toHaveURL(`/finance/receivables?size=25&bucket=1-30&client=${client.companyId}`)
 })
 
-test("chips remove one filter each and Clear removes both; a selection with nothing in it says so", async ({ page }) => {
+test("the age chip and Clear remove only the age, keeping the client; a selection with nothing in it says so", async ({ page }) => {
   await page.goto("/finance/receivables")
   const { clients, bookAgeing } = await book(page)
   const client = clients.find((row) => row.overdueCents > 0)!
   await page.goto(`/finance/receivables?bucket=1-30&client=${client.companyId}`)
   await expectFigures(page, client.buckets.days1to30.cents, client.buckets.days1to30.cents, client.buckets.days1to30.count)
-  await expect(page.getByTestId("filter-chip")).toHaveText(["1–30 days late", client.companyName])
+  await expect(page.getByTestId("filter-chip")).toHaveText(["1–30 days late"])
   await page.getByRole("link", { name: "Remove filter: 1–30 days late" }).click()
   await expect(page).toHaveURL(`/finance/receivables?client=${client.companyId}`)
-  await expect(page.getByTestId("filter-chip")).toHaveText([client.companyName])
-  await page.getByTestId("clear-filters").click()
-  await expect(page).toHaveURL(/\/finance\/receivables$/)
   await expect(page.getByTestId("filter-chips")).toHaveCount(0)
+  await expect(clientFilter(page)).toContainText(client.companyName)
+  await page.goto(`/finance/receivables?bucket=1-30&client=${client.companyId}`)
+  await page.getByTestId("clear-filters").click()
+  await expect(page).toHaveURL(`/finance/receivables?client=${client.companyId}`)
 
   // Unknown values are ignored rather than failing.
   await page.goto("/finance/receivables?bucket=in-flight&client=nobody")
   await expect(page.getByTestId("filter-chips")).toHaveCount(0)
+  await expect(clientFilter(page)).toContainText("All clients")
   await expectFigures(page, bookAgeing.outstandingCents, bookAgeing.overdueCents, bookAgeing.invoiceCount)
 
   const late = Object.entries(bookAgeing.buckets).find(([key, total]) => key !== "current" && total.cents === 0)
@@ -183,7 +191,6 @@ test("chips remove one filter each and Clear removes both; a selection with noth
   await page.goto(`/finance/receivables?bucket=${param}`)
   await expect(page.getByTestId("no-receivable-invoices")).toContainText("No unpaid invoices match these filters.")
   await expect(byAgeRow(page, late![0])).toHaveAttribute("aria-pressed", "true")
-  await expect(page.getByTestId("by-client")).toContainText("No client owes money of this age.")
   await shot(page, "receivables-no-match")
   await page.getByTestId("no-receivable-invoices").getByRole("link", { name: "Clear" }).click()
   await expect(page).toHaveURL(/\/finance\/receivables$/)
@@ -297,7 +304,8 @@ test("once nothing is owed, Receivables says so with no charts and no table", as
   const { bookAgeing } = await book(page)
   expect(bookAgeing.outstandingCents).toBe(0)
   await expect(page.getByTestId("nothing-owed")).toContainText("Nothing is owed.")
-  await expect(page.getByTestId("receivables-charts")).toHaveCount(0)
+  await expect(page.getByTestId("by-age")).toHaveCount(0)
+  await expect(page.getByTestId("receivables-client-filter")).toHaveCount(0)
   await expect(page.getByTestId("receivables-table")).toHaveCount(0)
   if (bookAgeing.inFlight.cents > 0) await expect(page.getByTestId("receivables-inflight")).toHaveAttribute("data-cents", String(bookAgeing.inFlight.cents))
   await shot(page, "receivables-empty")

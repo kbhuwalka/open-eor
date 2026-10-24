@@ -12,10 +12,9 @@ import { BarList } from "@/components/finance-portal/charts/bar-list"
 import { InvoicesTable } from "@/components/finance-portal/invoices-table"
 import { FilterChips, RefetchBar } from "@/components/finance-portal/list-controls"
 import { buttonVariants } from "@/components/ui/button"
-import { ChartLegendList } from "@/components/ui/chart"
 import type { BarListRow } from "@/lib/finance-chart-view"
 import { financeInvoiceHref } from "@/lib/invoice-links"
-import type { ReceivablesChip, ReceivablesFigures as Figures } from "@/lib/receivables-view"
+import { ageTakeaway, type ReceivablesChip, type ReceivablesFigures as Figures } from "@/lib/receivables-view"
 import type { FinanceReceivablesPage } from "@/server/finance-lists"
 
 import { ReceivablesFigures } from "./receivables-figures"
@@ -23,26 +22,22 @@ import { ReceivablesFigures } from "./receivables-figures"
 export type ReceivablesDashboardProps = {
   figures: Figures
   byAge: readonly BarListRow[]
-  byClient: readonly BarListRow[]
   chips: readonly ReceivablesChip[]
-  /** Both filters off, the other parameters kept. */
+  /** The age filter off, the client and other parameters kept. */
   clearHref: string
   table: FinanceReceivablesPage
 }
 
-const CLIENT_LEGEND = [
-  { key: "overdue", label: "Overdue", tone: "alert" as const },
-  { key: "not-yet-due", label: "Not yet due", tone: "neutral" as const },
-]
-
 /**
- * Receivables (docs/finance-portal.md §2.5, ui-guidelines C32): the figures line, the By age and
- * By client bar lists that filter the table (`?bucket=`, `?client=`), the chips of what is
- * selected, and the unpaid invoices in the chase order. Every filter is a link the server renders
- * from the URL; a plain click navigates softly in a transition, so the figures and the table dim
- * until the server answers. A table row opens the invoice in the Invoices drawer.
+ * Receivables (docs/finance-portal.md §2.5, ui-guidelines C32), laid out like the Finance Home: the
+ * figures line, the By age chart across the page (a bar list whose rows filter the table with
+ * `?bucket=`), then "Unpaid invoices" with the chip of the selected age and the table in the
+ * chase order. The client is the header's filter (`?client=`), which narrows all three. Every
+ * filter is a link the server renders from the URL; a plain click navigates softly in a
+ * transition, so the figures and the table dim until the server answers. A table row opens the
+ * invoice in the Invoices drawer.
  */
-export function ReceivablesDashboard({ figures, byAge, byClient, chips, clearHref, table }: ReceivablesDashboardProps) {
+export function ReceivablesDashboard({ figures, byAge, chips, clearHref, table }: ReceivablesDashboardProps) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [cursor, setCursor] = useState<string | null>(null)
@@ -54,40 +49,46 @@ export function ReceivablesDashboard({ figures, byAge, byClient, chips, clearHre
   const dim = cn("transition-opacity", pending && "opacity-60")
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8">
       <div className={dim} aria-busy={pending}>
         <ReceivablesFigures figures={figures} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2" data-testid="receivables-charts">
-        <BarList title="By age" rows={byAge} rowHeader="Days late" emptyMessage="Nothing is owed." onNavigate={navigate} testId="by-age" />
-        <BarList
-          title="By client"
-          rows={byClient}
-          rowHeader="Client"
-          emptyMessage="No client owes money of this age."
-          onNavigate={navigate}
-          testId="by-client"
-          footer={<ChartLegendList items={CLIENT_LEGEND} className="px-2.5" />}
-        />
-      </div>
-
-      {chips.length > 0 ? (
-        <FilterChips
-          chips={chips.map((chip) => ({ key: chip.key, label: chip.label, remove: { href: chip.href, run: () => navigate(chip.href) } }))}
-          clear={{ href: clearHref, run: () => navigate(clearHref) }}
-        />
-      ) : null}
+      <BarList
+        title="By age"
+        takeaway={ageTakeaway(byAge)}
+        variant="section"
+        rows={byAge}
+        rowHeader="Days late"
+        emptyMessage="Nothing is owed."
+        onNavigate={navigate}
+        testId="by-age"
+      />
 
       <section
-        aria-label="Unpaid invoices"
+        aria-labelledby="receivables-invoices-title"
         aria-busy={pending}
-        className="relative flex flex-col gap-4"
+        className="relative flex flex-col gap-3"
         data-testid="receivables-invoices"
         data-total={table.total}
         data-total-cents={table.summary.outstandingCents}
       >
         <RefetchBar pending={pending} testId="receivables-refetching" />
+        <div className="flex min-h-8 flex-wrap items-center gap-x-3 gap-y-2">
+          <h3 id="receivables-invoices-title" className="text-base font-semibold">
+            Unpaid invoices{" "}
+            <span className="font-normal text-muted-foreground tabular-nums">
+              <span aria-hidden>· </span>
+              <span data-testid="receivables-count">{table.total}</span>
+            </span>
+          </h3>
+          {chips.length > 0 ? (
+            <FilterChips
+              chips={chips.map((chip) => ({ key: chip.key, label: chip.label, remove: { href: chip.href, run: () => navigate(chip.href) } }))}
+              clear={{ href: clearHref, run: () => navigate(clearHref) }}
+            />
+          ) : null}
+        </div>
         <div className={dim}>
           {table.total === 0 ? (
             <div data-testid="no-receivable-invoices">

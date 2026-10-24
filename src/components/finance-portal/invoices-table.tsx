@@ -13,11 +13,10 @@ import { daysLate } from "@/lib/receivables-view"
 const HEAD = "text-xs font-medium tracking-wide text-muted-foreground uppercase"
 
 /**
- * Client then Person fold away as the table's own width shrinks (a container query, so the
- * sidebar is accounted for); the drawer still has both.
+ * Person folds away as the table's own width shrinks (a container query, so the sidebar is
+ * accounted for); the drawer still has it. The client always shows, muted under the number.
  */
 const PERSON_COLUMN = "hidden @xl:table-cell"
-const CLIENT_COLUMN = "hidden @2xl:table-cell"
 
 const settled = (row: StaffInvoiceRow) => row.displayStatus === "paid" || row.displayStatus === "void"
 
@@ -44,8 +43,8 @@ export type InvoicesTableProps = {
 }
 
 /**
- * The Invoices records as a C6 table (ui-guidelines C30): one line per invoice with the number,
- * person, client, due day, status (or days late) and amount, in the server's fixed order and with
+ * The Invoices records as a C6 table (ui-guidelines C30): one row per invoice with the number
+ * (the client muted beneath it), person, due day, status (or days late) and amount, in the server's fixed order and with
  * no sortable headers. The whole row opens the staff drawer: the number is a link to the row's
  * `?open=` URL stretched over the row, so a modified click opens a new tab.
  */
@@ -57,14 +56,11 @@ export function InvoicesTable({ rows, today, cursor, hrefOf, onOpen, variant = "
         <TableCaption className="sr-only">{caption}</TableCaption>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            <TableHead scope="col" className={cn(HEAD, "w-32")}>
+            <TableHead scope="col" className={HEAD}>
               Invoice
             </TableHead>
             <TableHead scope="col" className={cn(HEAD, PERSON_COLUMN)}>
               Person
-            </TableHead>
-            <TableHead scope="col" className={cn(HEAD, CLIENT_COLUMN)}>
-              Client
             </TableHead>
             <TableHead scope="col" className={cn(HEAD, "w-24")}>
               Due
@@ -96,17 +92,18 @@ export function InvoicesTable({ rows, today, cursor, hrefOf, onOpen, variant = "
                     onOpen={() => onOpen(row.id)}
                     label={late ? invoiceRowLabel(row, late.label) : invoiceRowLabel(row)}
                     testId="invoice-open"
+                    className="w-full flex-col items-start gap-0"
                   >
                     <span className="font-medium tabular-nums" data-testid="invoice-number">
                       {row.number}
+                    </span>
+                    <span className="max-w-full truncate text-xs text-muted-foreground" title={row.companyName} data-testid="invoice-client">
+                      {row.companyName}
                     </span>
                   </RowOpener>
                 </TableCell>
                 <TableCell className={cn(PERSON_COLUMN, "truncate")} title={row.personName || undefined} data-testid="invoice-person">
                   {row.personName || <span className="text-muted-foreground">—</span>}
-                </TableCell>
-                <TableCell className={cn(CLIENT_COLUMN, "truncate text-muted-foreground")} title={row.companyName} data-testid="invoice-client">
-                  {row.companyName}
                 </TableCell>
                 <TableCell className={cn("tabular-nums", settled(row) && "text-muted-foreground")} data-testid="invoice-due">
                   {formatIsoDayInYear(row.dueDate, today)}

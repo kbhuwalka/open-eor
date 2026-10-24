@@ -54,10 +54,10 @@ const section = (name: RegExp) => screen.getByRole("region", { name })
 afterEach(cleanup)
 
 describe("PersonaPicker", () => {
-  it("says who to pick and that there is no password", () => {
+  it("says who to pick, with no demo-session line under the title", () => {
     renderPicker()
     expect(screen.getByRole("heading", { level: 1, name: "Choose who you're signing in as" })).toBeInTheDocument()
-    expect(screen.getByText(/demo session.*no password/i)).toBeInTheDocument()
+    expect(screen.queryByText(/demo session|no password/i)).not.toBeInTheDocument()
   })
 
   it("shows Clients, Northwind and Employees in that order, each with its count", () => {

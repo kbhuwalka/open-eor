@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import { SEED_IDS, SEED_NOW, type AppDatabase } from "@/db"
 import { DEFAULT_INVOICES_QUERY, DEFAULT_PAYMENTS_QUERY } from "@/lib/finance-portal-query"
-import { bucketRows, clientRows, compareChaseOrder, RECEIVABLES_BUCKETS, receivablesFigures } from "@/lib/receivables-view"
+import { bucketRows, compareChaseOrder, RECEIVABLES_BUCKETS, receivablesFigures } from "@/lib/receivables-view"
 
 import { failPayment, markDepositReceived, settlePayment } from "../billing"
 import { loadPaymentsForInvoices } from "../billing-core"
@@ -276,17 +276,12 @@ describe("financeReceivablesPage", () => {
           overdue: summary.overdueCents,
           count: summary.count,
         })
-        // Each chart covers the book filtered by the other chart: its rows add up to what the
-        // table shows once its own filter is off, and its selected row to the table itself.
+        // By age covers the book filtered by the client: its rows add up to what the table shows
+        // once the bucket filter is off, and its selected row to the table itself.
         const byAge = bucketRows(ageing, query)
         const unbucketed = financeReceivablesPage(db, actor, { bucket: null, client }, SEED_NOW).summary
         expect([sum(byAge), count(byAge)], label).toEqual([unbucketed.outstandingCents, unbucketed.count])
-        const byClient = clientRows(ageing, query)
-        const unclient = financeReceivablesPage(db, actor, { bucket, client: null }, SEED_NOW).summary
-        expect([sum(byClient), count(byClient)], label).toEqual([unclient.outstandingCents, unclient.count])
-        const overdueOf = (rows: typeof byClient) => rows.reduce((total, row) => total + row.segments[0].cents, 0)
-        expect(overdueOf(byClient), label).toBe(unclient.overdueCents)
-        for (const row of [...byAge, ...byClient].filter((row) => row.selected)) {
+        for (const row of byAge.filter((row) => row.selected)) {
           expect([row.cents, row.count], label).toEqual([summary.outstandingCents, summary.count])
         }
       }

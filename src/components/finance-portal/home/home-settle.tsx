@@ -33,7 +33,7 @@ export function HomeSettleStatus() {
   )
 }
 
-/** A "Waiting on you" row's Settle: the same confirm as Payments, then the Home refreshes and the row leaves. */
+/** A To do row's Settle: the same confirm as Payments, then the Home refreshes and the row leaves. */
 export function HomeSettleButton({ payment }: { payment: SettleTarget }) {
   const router = useRouter()
   const { report } = useContext(SettledContext)

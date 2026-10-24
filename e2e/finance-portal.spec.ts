@@ -330,7 +330,7 @@ test("Invoices is a table, newest first, with the exact summary and no sort", as
   await expect(page.getByText("Sort", { exact: true })).toHaveCount(0)
 
   const table = page.getByRole("table", { name: "Invoices" })
-  await expect(table.getByRole("columnheader")).toHaveText(["Invoice", "Person", "Client", "Due", "Status", "Amount"])
+  await expect(table.getByRole("columnheader")).toHaveText(["Invoice", "Person", "Due", "Status", "Amount"])
   const rows = page.getByTestId("invoice-row")
   await expect(rows).toHaveCount(10)
   const numbers = (await rows.getByTestId("invoice-number").allInnerTexts()).map((text) => text.trim())
@@ -342,7 +342,7 @@ test("Invoices is a table, newest first, with the exact summary and no sort", as
   expect(numbers).toEqual(newest)
   for (const text of await rows.getByTestId("invoice-due").allInnerTexts()) expect(text.trim()).toMatch(/^[A-Z][a-z]{2} \d{1,2}(, \d{4})?$/)
   for (const text of await rows.allInnerTexts()) expect(text).not.toMatch(/\bDue\b|Deposit|Payroll/)
-  for (const height of await rows.evaluateAll((trs) => trs.map((tr) => tr.getBoundingClientRect().height))) expect(height).toBeLessThan(50)
+  for (const height of await rows.evaluateAll((trs) => trs.map((tr) => tr.getBoundingClientRect().height))) expect(height).toBeLessThan(70)
 
   // The whole row is the link: its stretched area covers the amount, so a click there opens the drawer.
   await rows.first().getByTestId("invoice-amount").click({ force: true })
@@ -516,13 +516,15 @@ test("billing run: preview, run, and a second press issues nothing", async ({ pa
 
 test("a client on Receivables filters its unpaid invoices, each opening in the Invoices drawer", async ({ page }) => {
   await page.goto("/finance/receivables")
-  const row = page.getByTestId("by-client").locator("a[data-testid=bar-list-row]").first()
-  const companyId = await row.getAttribute("data-key")
-  await row.click()
-  await expect(page).toHaveURL(`/finance/receivables?client=${companyId}`)
+  const filter = page.getByTestId("receivables-client-filter")
+  await filter.click()
+  const option = page.getByRole("option").nth(1)
+  const name = await option.innerText()
+  await option.click()
+  await expect(page).toHaveURL(/\/finance\/receivables\?client=[\w-]+$/)
+  await expect(filter).toContainText(name.trim())
   const table = page.getByTestId("receivables-table")
   await expect(table.getByTestId("invoice-row").first()).toBeVisible()
-  const name = await row.getByTestId("bar-list-label").innerText()
   for (const client of await table.getByTestId("invoice-client").allInnerTexts()) expect(client.trim()).toBe(name.trim())
   await shot(page, "receivables-drilldown")
   const number = await table.getByTestId("invoice-number").first().innerText()

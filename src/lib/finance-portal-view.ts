@@ -135,6 +135,8 @@ export type WaitAge = {
   started: string
   /** Calendar days since then: "3 days", "today". */
   label: string
+  /** The last business day Finance can settle it without being late (`YYYY-MM-DD`). */
+  due: string
   late: boolean
 }
 
@@ -143,7 +145,7 @@ export function waitAge(initiatedAt: string, today: string): WaitAge {
   const started = businessDayOf(initiatedAt)
   const days = Math.max(0, daysBetween(started, today))
   const due = toIsoDate(addBusinessDays(localDate(started), SETTLE_WAIT_BUSINESS_DAYS))
-  return { started, label: days === 0 ? "today" : plural(days, "day"), late: today > due }
+  return { started, label: days === 0 ? "today" : plural(days, "day"), due, late: today > due }
 }
 
 /** The day a payment started (its business day) and how long it has waited as of `today` (`YYYY-MM-DD`). */

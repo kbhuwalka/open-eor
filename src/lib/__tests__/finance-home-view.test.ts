@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
 
-import type { ClientAgeingRow, WaitingPayment } from "@/server/finance-insights"
+import type { WaitingPayment } from "@/server/finance-insights"
 import type { FinanceOverview } from "@/server/finance-portal-queries"
 
-import { homeDateLabel, homeTiles, shortWeekdayDay, topOverdueClients, waitingDetail } from "../finance-home-view"
+import { homeDateLabel, homeFigures, homeHref, parseHomeClient, paymentsHref, shortWeekdayDay, waitingTitle } from "../finance-home-view"
 import { settleWait, waitAge } from "../finance-portal-view"
 
 const overview = (patch: Partial<FinanceOverview> = {}): FinanceOverview => ({
@@ -14,7 +14,7 @@ const overview = (patch: Partial<FinanceOverview> = {}): FinanceOverview => ({
   ...patch,
 })
 
-const tile = (o: FinanceOverview, key: string) => homeTiles(o).find((t) => t.key === key)!
+const figure = (o: FinanceOverview, key: string) => homeFigures(o).find((f) => f.key === key)!
 
 describe("Home dates", () => {
   it("names the business day with its weekday", () => {
@@ -26,7 +26,7 @@ describe("Home dates", () => {
 
 describe("waitAge", () => {
   it("counts calendar days and turns late after three business days", () => {
-    expect(waitAge("2026-10-21T15:00:00.000Z", "2026-10-24")).toEqual({ started: "2026-10-21", label: "3 days", late: false })
+    expect(waitAge("2026-10-21T15:00:00.000Z", "2026-10-24")).toEqual({ started: "2026-10-21", label: "3 days", due: "2026-10-26", late: false })
     expect(waitAge("2026-10-20T15:00:00.000Z", "2026-10-23").late).toBe(false)
     expect(waitAge("2026-10-20T15:00:00.000Z", "2026-10-24").late).toBe(true)
     expect(waitAge("2026-10-19T15:00:00.000Z", "2026-10-23")).toMatchObject({ label: "4 days", late: true })
@@ -42,74 +42,72 @@ describe("waitAge", () => {
   })
 })
 
-describe("homeTiles", () => {
-  it("are To settle, Overdue and Ready to bill, each linking to its page", () => {
-    expect(homeTiles(overview()).map((t) => [t.key, t.label, t.href])).toEqual([
-      ["to-settle", "To settle", "/finance/payments"],
-      ["overdue", "Overdue", "/finance/receivables"],
-      ["ready-to-bill", "Ready to bill", "/finance/billing"],
+describe("homeFigures", () => {
+  it("are what is to settle, overdue and ready to bill, each linking to its page", () => {
+    expect(homeFigures(overview()).map((f) => [f.key, f.href])).toEqual([
+      ["to-settle", "/finance/payments"],
+      ["overdue", "/finance/receivables"],
+      ["ready-to-bill", "/finance/billing"],
     ])
   })
 
-  it("To settle counts the payments and their total, with the oldest wait", () => {
-    const t = tile(overview(), "to-settle")
-    expect(t).toMatchObject({ value: "5 payments · $95,566.46", context: "oldest 3 days", contextDanger: false, action: "View payments" })
-  })
-
-  it("To settle's oldest wait turns danger once over three business days", () => {
-    const late = overview({ today: "2026-10-27", toSettle: { count: 1, cents: 678_284, oldestInitiatedAt: "2026-10-21T15:00:00.000Z" } })
-    expect(tile(late, "to-settle")).toMatchObject({ value: "1 payment · $6,782.84", context: "oldest 6 days", contextDanger: true })
-  })
-
-  it("To settle with nothing waiting", () => {
+  it("To settle is the total of the waiting payments, or a plain sentence when none waits", () => {
+    expect(figure(overview(), "to-settle")).toMatchObject({ amountCents: 9_556_646, text: "to settle", danger: false })
     const none = overview({ toSettle: { count: 0, cents: 0, oldestInitiatedAt: null } })
-    expect(tile(none, "to-settle")).toMatchObject({ value: "None", context: "Nothing waiting on you", contextDanger: false })
+    expect(figure(none, "to-settle")).toMatchObject({ amountCents: null, text: "Nothing to settle", danger: false })
   })
 
-  it("Overdue states the amount across the invoices in the danger tone, and the oldest age", () => {
-    expect(tile(overview(), "overdue")).toMatchObject({ value: "$217,819.91 across 12 invoices", valueDanger: true, context: "oldest 17 days" })
+  it("Overdue is the amount in the danger tone, or a plain sentence when nothing is overdue", () => {
+    expect(figure(overview(), "overdue")).toMatchObject({ amountCents: 21_781_991, text: "overdue", danger: true })
     const none = overview({ overdue: { count: 0, cents: 0, oldestDays: null } })
-    expect(tile(none, "overdue")).toMatchObject({ value: "None", valueDanger: false, context: "No invoice is past due" })
+    expect(figure(none, "overdue")).toMatchObject({ amountCents: null, text: "Nothing overdue", danger: false })
   })
 
-  it("Ready to bill with nothing ready says when billing is next and has no Run billing button", () => {
-    expect(tile(overview(), "ready-to-bill")).toMatchObject({ value: "None", context: "next billing Fri Oct 30", actionButton: false })
+  it("Ready to bill with nothing ready says when billing is next", () => {
+    expect(figure(overview(), "ready-to-bill")).toMatchObject({ amountCents: null, text: "Next billing Fri Oct 30" })
     const unscheduled = overview({ readyToBill: { count: 0, cents: 0, nextIssueDate: null } })
-    expect(tile(unscheduled, "ready-to-bill").context).toBe("No billing scheduled")
+    expect(figure(unscheduled, "ready-to-bill").text).toBe("No billing scheduled")
   })
 
-  it("Ready to bill with invoices due offers Run billing", () => {
+  it("Ready to bill with invoices due is their total", () => {
     const ready = overview({ readyToBill: { count: 3, cents: 1_234_500, nextIssueDate: "2026-11-13" } })
-    expect(tile(ready, "ready-to-bill")).toMatchObject({ value: "3 invoices · $12,345.00", action: "Run billing", actionButton: true })
+    expect(figure(ready, "ready-to-bill")).toMatchObject({ amountCents: 1_234_500, text: "ready to bill", danger: false })
   })
 })
 
-describe("waitingDetail", () => {
-  const base: Pick<WaitingPayment, "invoiceCount" | "firstInvoice" | "deposit"> = {
+describe("waitingTitle", () => {
+  const base: Pick<WaitingPayment, "invoiceCount" | "firstInvoice"> = {
     invoiceCount: 1,
     firstInvoice: { id: "payroll:h:1", number: "INV-2026-0062", personName: "Noah Carter" },
-    deposit: null,
   }
 
-  it("names one invoice and its person, or counts several", () => {
-    expect(waitingDetail(base)).toBe("INV-2026-0062 · Noah Carter")
-    expect(waitingDetail({ ...base, invoiceCount: 6 })).toBe("6 invoices")
-  })
-
-  it("leads with the deposit and the start date", () => {
-    const deposit = { invoiceId: "deposit:h", invoiceNumber: "INV-2026-0070", personName: "Dev Petrova", startDate: "2026-11-02" }
-    expect(waitingDetail({ ...base, deposit })).toBe("Deposit · starts Nov 2 · Dev Petrova")
-    expect(waitingDetail({ ...base, invoiceCount: 3, deposit })).toBe("Deposit · starts Nov 2 · 3 invoices")
-    expect(waitingDetail({ ...base, deposit: { ...deposit, startDate: null } })).toBe("Deposit · Dev Petrova")
+  it("names the one invoice, or counts several", () => {
+    expect(waitingTitle(base)).toBe("INV-2026-0062")
+    expect(waitingTitle({ ...base, invoiceCount: 6 })).toBe("6 invoices")
   })
 })
 
-describe("topOverdueClients", () => {
-  const client = (companyName: string, overdueCents: number) => ({ companyId: companyName, companyName, overdueCents }) as ClientAgeingRow
+describe("the client filter", () => {
+  it("reads ?client= as an id, or all clients", () => {
+    expect(parseHomeClient({ client: "acme" })).toBe("acme")
+    expect(parseHomeClient({ client: ["acme", "other"] })).toBe("acme")
+    expect(parseHomeClient({})).toBeNull()
+    expect(parseHomeClient({ client: "" })).toBeNull()
+    expect(parseHomeClient({ client: "a b/../c" })).toBeNull()
+  })
 
-  it("keeps the three clients owing the most overdue money, and only clients with something overdue", () => {
-    const clients = [client("A", 0), client("B", 500), client("C", 9_000), client("D", 700), client("E", 700)]
-    expect(topOverdueClients(clients).map((c) => c.companyName)).toEqual(["C", "D", "E"])
-    expect(topOverdueClients([client("A", 0)])).toEqual([])
+  it("writes the Home and Payments URLs with or without the client", () => {
+    expect(homeHref(null)).toBe("/finance")
+    expect(homeHref("acme")).toBe("/finance?client=acme")
+    expect(paymentsHref(null)).toBe("/finance/payments")
+    expect(paymentsHref("acme")).toBe("/finance/payments?client=acme")
+  })
+
+  it("narrows the To settle and Overdue links to the client, and leaves Billing run alone", () => {
+    expect(homeFigures(overview(), "acme").map((f) => [f.key, f.href])).toEqual([
+      ["to-settle", "/finance/payments?client=acme"],
+      ["overdue", "/finance/receivables?client=acme"],
+      ["ready-to-bill", "/finance/billing"],
+    ])
   })
 })

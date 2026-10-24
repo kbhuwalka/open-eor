@@ -1,16 +1,16 @@
 /**
- * The Receivables dashboard's URL state and view models (docs/finance-portal.md §2.5,
- * ui-guidelines C32). Two bar lists filter the invoice table: By age (`?bucket=`) and By client
- * (`?client=`). The two combine, and each chart is drawn from the book filtered by the other
- * chart's selection only (a crossfilter), so a chart's own bars never move when it is clicked.
- * Every row is a link that toggles its own parameter, keeps the others and resets the page. Money
- * in flight is not owed: it is never a row, only a figure. Pure: no React, no I/O.
+ * The Receivables page's URL state and view models (docs/finance-portal.md §2.5, ui-guidelines
+ * C32). The By age bar list filters the invoice table (`?bucket=`) and the header's Client filter
+ * narrows everything (`?client=`); the two combine. By age is drawn from the book filtered by the
+ * selected client only, so its own bars never move when one is clicked. Every row is a link that
+ * toggles `?bucket=`, keeps the other parameters and resets the page. Money in flight is not owed:
+ * it is never a row, only a figure. Pure: no React, no I/O.
  */
 import type { AgeingBucket, BucketTotal } from "@/server/billing-queries"
 import type { AgeingTotals, ClientAgeing, ClientAgeingRow } from "@/server/finance-insights"
 
-import type { BarListRow, BarTone } from "./finance-chart-view"
-import { daysBetween, plural } from "./finance-portal-view"
+import { percentOf, type BarListRow, type BarTone } from "./finance-chart-view"
+import { daysBetween, formatCompactCents, plural } from "./finance-portal-view"
 import { formatCents } from "./format"
 import { DEFAULT_PAGE_SIZE, isPageSize, type PageSize } from "./pagination"
 
@@ -52,9 +52,6 @@ export const BUCKET_TONE: Record<AgeingBucket, BarTone> = {
   days31to60: "alert",
   days60plus: "critical",
 }
-
-/** By client shows this many rows at most; past it the smallest fold into one "N others" row. */
-export const CLIENT_ROW_LIMIT = 6
 
 // ── URL state ───────────────────────────────────────────────────────
 
@@ -181,12 +178,6 @@ function rowName(spoken: string, cents: number, count: number, selected: boolean
   return `${spoken}: ${formatCents(cents)}, ${plural(count, "invoice")}${selected ? ", selected" : ""}`
 }
 
-/** "Acme Robotics: $140,579.02, $109,238.55 overdue, 21 invoices, selected". */
-function clientRowName(name: string, cents: number, overdueCents: number, count: number, selected: boolean): string {
-  const overdue = overdueCents > 0 ? `${formatCents(overdueCents)} overdue` : "nothing overdue"
-  return `${name}: ${formatCents(cents)}, ${overdue}, ${plural(count, "invoice")}${selected ? ", selected" : ""}`
-}
-
 /**
  * By age: the four buckets of the book filtered by the selected client (not by the selected
  * bucket, so these bars stay put when one is clicked). A row toggles `?bucket=`; an empty row
@@ -212,83 +203,31 @@ export function bucketRows(ageing: ClientAgeing, query: Pick<ReceivablesQuery, "
   )
 }
 
-/**
- * By client: what each client owes in the book filtered by the selected bucket, largest first, as
- * two parts (overdue, then not yet due). More than `limit` clients keep the largest `limit - 1`
- * and fold the rest into one "N others" row that links nowhere; the selected client is never
- * folded away, so it can always be cleared.
- */
-export function clientRows(
-  ageing: ClientAgeing,
-  query: Pick<ReceivablesQuery, "bucket" | "client">,
-  current: string = "",
-  limit: number = CLIENT_ROW_LIMIT,
-): BarListRow[] {
-  const rows = ageing.clients
-    .map((client) => {
-      const owed = owedOf(client, query.bucket)
-      const selected = query.client === client.companyId
-      return {
-        key: client.companyId,
-        label: client.companyName,
-        cents: owed.cents,
-        count: owed.count,
-        segments: [
-          { tone: "alert" as const, cents: owed.overdueCents },
-          { tone: "neutral" as const, cents: owed.cents - owed.overdueCents },
-        ],
-        selected,
-        href: owed.cents > 0 || selected ? receivablesHref({ client: selected ? null : client.companyId }, current) : null,
-        name: clientRowName(client.companyName, owed.cents, owed.overdueCents, owed.count, selected),
-      }
-    })
-    .filter((row) => row.cents > 0 || row.selected)
-    .sort((a, b) => b.cents - a.cents || a.label.localeCompare(b.label))
-
-  if (rows.length <= limit) return scaled(rows)
-  const shown = rows.slice(0, limit - 1)
-  const rest = rows.slice(limit - 1)
-  const pinned = rest.find((row) => row.selected)
-  const folded = rest.filter((row) => !row.selected)
-  if (pinned) shown.push(pinned)
-  const sum = (pick: (row: (typeof rows)[number]) => number) => folded.reduce((total, row) => total + pick(row), 0)
-  const cents = sum((row) => row.cents)
-  const overdue = sum((row) => row.segments[0].cents)
-  const count = sum((row) => row.count)
-  const label = plural(folded.length, "other")
-  return scaled([
-    ...shown,
-    {
-      key: "others",
-      label,
-      cents,
-      count,
-      segments: [
-        { tone: "alert", cents: overdue },
-        { tone: "neutral", cents: cents - overdue },
-      ],
-      selected: false,
-      href: null,
-      folded: true,
-      name: clientRowName(label, cents, overdue, count, false),
-    },
-  ])
+/** The By age heading's takeaway: how much of the book is late ("62% overdue of $350K outstanding"). */
+export function ageTakeaway(rows: readonly BarListRow[]): string {
+  const owed = rows.reduce((total, row) => total + row.cents, 0)
+  if (owed === 0) return "Nothing is owed."
+  const late = rows.filter((row) => row.key !== "current").reduce((total, row) => total + row.cents, 0)
+  return `${percentOf(late, owed)}% overdue of ${formatCompactCents(owed)} outstanding`
 }
 
-export type ReceivablesChip = { key: "bucket" | "client"; label: string; href: string }
-
-/** One removable chip per selection, By age first; each chip's link removes only its own filter. */
-export function receivablesChips(ageing: ClientAgeing, query: Pick<ReceivablesQuery, "bucket" | "client">, current: string = ""): ReceivablesChip[] {
-  const chips: ReceivablesChip[] = []
-  if (query.bucket) chips.push({ key: "bucket", label: BUCKET_LABEL[query.bucket], href: receivablesHref({ bucket: null }, current) })
-  if (query.client) {
-    chips.push({ key: "client", label: clientOf(ageing, query.client)?.companyName ?? "Unknown client", href: receivablesHref({ client: null }, current) })
-  }
-  return chips
+/** The clients the Client filter offers: those that owe something, by name. */
+export function owingClients(ageing: ClientAgeing): { id: string; name: string }[] {
+  return ageing.clients
+    .filter((client) => client.outstandingCents > 0)
+    .map((client) => ({ id: client.companyId, name: client.companyName }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
-/** Both filters off, the other parameters kept. */
-export const clearedReceivablesHref = (current: string = ""): string => receivablesHref({ bucket: null, client: null }, current)
+export type ReceivablesChip = { key: "bucket"; label: string; href: string }
+
+/** The selected age as a removable chip; the client is the header filter's, so it has none. */
+export function receivablesChips(query: Pick<ReceivablesQuery, "bucket">, current: string = ""): ReceivablesChip[] {
+  return query.bucket ? [{ key: "bucket", label: BUCKET_LABEL[query.bucket], href: receivablesHref({ bucket: null }, current) }] : []
+}
+
+/** The age filter off, the client and other parameters kept. */
+export const clearedReceivablesHref = (current: string = ""): string => receivablesHref({ bucket: null }, current)
 
 // ── Rows of the table ───────────────────────────────────────────────
 

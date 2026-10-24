@@ -4,21 +4,21 @@ import { test, expect, type Page } from "@playwright/test"
 
 import type { SessionUser } from "@/auth"
 import * as schema from "@/db/schema"
-import { ageingTakeaway, collectionTakeaway } from "@/lib/finance-chart-view"
-import { homeDateLabel, shortWeekdayDay, topOverdueClients } from "@/lib/finance-home-view"
-import { plural } from "@/lib/finance-portal-view"
+import { collectionTakeaway } from "@/lib/finance-chart-view"
+import { homeDateLabel, shortWeekdayDay } from "@/lib/finance-home-view"
 import { formatCents } from "@/lib/format"
 import { previewBillingRun } from "@/server/billing-preview"
-import { billedVsCollectedByPeriod, clientAgeing } from "@/server/finance-insights"
+import { listCompanyOptions } from "@/server/finance-portal-queries"
+import { ageingTotalsFor, billedVsCollectedByPeriod, clientAgeing, oldestWaitingPayments } from "@/server/finance-insights"
 
 import { cents, dbFile, openLiveDb, signInAs, todayEastern, writeLiveDb } from "./support/live"
 
 /**
- * The Finance Home on the real page, as Morgan Reyes (Finance): the date, the three tiles agreeing
- * with Payments, Receivables and Billing run and linking to them, both charts with their takeaways,
- * Who owes us opening Receivables on a bucket or a client, Waiting on you in To settle's order with a row opening
- * the payment drawer, Settle from the Home, Run billing while invoices are due, and the empty state
- * once everything is settled. It WRITES (settles every waiting payment, makes three invoices due),
+ * The Finance Home on the real page, as Morgan Reyes (Finance): the date, the figures line agreeing
+ * with Payments, Receivables and Billing run and linking to them, billed vs collected on top at full
+ * width with its takeaway, To do below it in To settle's order with a row opening the payment
+ * drawer, the All clients / one client filter narrowing all three, Settle from the Home, the
+ * ready-to-bill figure while invoices are due, and the empty state once everything is settled. It WRITES (settles every waiting payment, makes three invoices due),
  * so run it against a fresh COPY of the seeded database on a production server:
  *
  *   cp data/eor.sqlite /tmp/fhome.sqlite
@@ -79,7 +79,7 @@ function toSettleOrder(): { id: string; deposit: number }[] {
 }
 
 const navPayments = (page: Page) => page.getByRole("navigation").getByRole("link", { name: /^Payments/ })
-const tileValue = (page: Page, key: string) => page.getByTestId(`tile-${key}-value`)
+const figureAmount = (page: Page, key: string) => page.getByTestId(`figure-${key}-amount`)
 
 test.beforeEach(async ({ context, baseURL, page }) => {
   if (process.env.E2E_THEME) await context.addCookies([{ name: "eor_theme", value: process.env.E2E_THEME, url: baseURL! }])
@@ -87,24 +87,25 @@ test.beforeEach(async ({ context, baseURL, page }) => {
   await page.goto("/finance")
 })
 
-test("the header names the day and the three tiles agree with Payments, Receivables and Billing run, each linking there", async ({ page }) => {
+test("the header names the day and the figures agree with Payments, Receivables and Billing run, each linking there", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Finance", exact: true })).toBeVisible()
   await expect(page.getByTestId("home-date")).toHaveText(homeDateLabel(todayEastern()))
   await expect(page.getByTestId("task-inbox")).toHaveCount(0)
   await expect(page.getByTestId("task-row")).toHaveCount(0)
+  await expect(page.getByTestId("home-tiles")).toHaveCount(0)
   await shot(page, "initial")
 
   const waiting = initiated()
   expect(waiting.count).toBeGreaterThan(0)
-  await expect(tileValue(page, "to-settle")).toHaveText(`${plural(waiting.count, "payment")} · ${formatCents(waiting.cents)}`)
-  await expect(page.getByTestId("tile-to-settle-context")).toHaveText(/^oldest (\d+ days?|started today)$/)
+  await expect(figureAmount(page, "to-settle")).toHaveAttribute("data-cents", String(waiting.cents))
+  await expect(page.getByTestId("figure-to-settle-text")).toHaveText("to settle")
   await expect(navPayments(page)).toContainText(String(waiting.count))
 
-  // Keyboard: the first tile is reachable with Tab and shows a focus ring on its stretched link.
-  const settleLink = page.getByTestId("tile-to-settle-link")
+  // Keyboard: the first figure is reachable with Tab and shows a focus ring on its link.
+  const settleLink = page.getByTestId("figure-to-settle-link")
   for (let i = 0; i < 40 && !(await settleLink.evaluate((el) => el === document.activeElement)); i += 1) await page.keyboard.press("Tab")
   await expect(settleLink).toBeFocused()
-  expect(await settleLink.evaluate((el) => getComputedStyle(el, "::after").boxShadow)).not.toBe("none")
+  expect(await settleLink.evaluate((el) => getComputedStyle(el).boxShadow)).not.toBe("none")
 
   await settleLink.click()
   await expect(page).toHaveURL(/\/finance\/payments$/)
@@ -113,71 +114,90 @@ test("the header names the day and the three tiles agree with Payments, Receivab
   await page.goto("/finance")
   const book = await model(page, (db) => clientAgeing(db, FINANCE, new Date()).bookAgeing)
   expect(book.overdueCents).toBeGreaterThan(0)
-  await expect(tileValue(page, "overdue")).toHaveText(`${formatCents(book.overdueCents)} across ${plural(book.overdueCount, "invoice")}`)
-  await expect(page.getByTestId("tile-overdue-context")).toHaveText(`oldest ${plural(book.oldestOverdueDays!, "day")}`)
-  await page.getByTestId("tile-overdue-link").click()
+  await expect(figureAmount(page, "overdue")).toHaveAttribute("data-cents", String(book.overdueCents))
+  await expect(page.getByTestId("figure-overdue-text")).toHaveText("overdue")
+  await page.getByTestId("figure-overdue-link").click()
   await expect(page).toHaveURL(/\/finance\/receivables$/)
   await expect(page.getByTestId("receivables-overdue")).toHaveAttribute("data-cents", String(book.overdueCents))
 
   await page.goto("/finance")
   const preview = await model(page, (db) => previewBillingRun(db, FINANCE, new Date()))
   expect(preview.wouldIssue.count).toBe(0)
-  await expect(tileValue(page, "ready-to-bill")).toHaveText("None")
-  await expect(page.getByTestId("tile-ready-to-bill-context")).toHaveText(`next billing ${shortWeekdayDay(preview.upcoming[0].issueDate)}`)
-  await expect(page.getByTestId("tile-run-billing")).toHaveCount(0)
-  await page.getByTestId("tile-ready-to-bill-link").click()
+  await expect(figureAmount(page, "ready-to-bill")).toHaveCount(0)
+  await expect(page.getByTestId("figure-ready-to-bill-text")).toHaveText(`Next billing ${shortWeekdayDay(preview.upcoming[0].issueDate)}`)
+  await page.getByTestId("figure-ready-to-bill-link").click()
   await expect(page).toHaveURL(/\/finance\/billing$/)
   await expect(page.getByTestId("would-issue-summary")).toHaveText(/^Nothing to issue\./)
   await expect(page.getByTestId("run-billing")).toBeDisabled()
 })
 
-test("both charts render with their takeaways and accessible tables; an ageing segment opens Receivables on its bucket", async ({ page }) => {
-  const [billed, ageing] = await model(page, (db) => [billedVsCollectedByPeriod(db, FINANCE, new Date(), 8), clientAgeing(db, FINANCE, new Date())] as const)
+test("billed vs collected is on top at full width, with To do below it", async ({ page }) => {
+  const billed = await model(page, (db) => billedVsCollectedByPeriod(db, FINANCE, new Date(), 8))
 
-  const left = page.getByTestId("home-billed")
-  await expect(left.getByRole("figure", { name: "Billed vs collected by pay period" })).toBeVisible()
-  await expect(left).toContainText(collectionTakeaway(billed.periods))
-  await expect(left.locator("table caption")).toHaveCount(1)
-  expect((await left.boundingBox())!.width).toBeGreaterThan((await page.getByTestId("home-who-owes").boundingBox())!.width)
-
-  const right = page.getByTestId("home-who-owes")
-  await expect(right.getByRole("figure", { name: "Who owes us" })).toBeVisible()
-  await expect(right).toContainText(ageingTakeaway(ageing.bookAgeing))
-  await expect(right.locator("table caption")).toHaveCount(1)
-  await expect(right.locator("[data-dimmed]")).toHaveCount(0)
-
-  const segment = right.locator("a[data-segment=current]")
-  await expect(segment).toHaveAttribute("href", "/finance/receivables?bucket=current")
-  await segment.click()
-  await expect(page).toHaveURL(/\/finance\/receivables\?bucket=current$/)
-  await expect(page.locator("[data-testid=by-age] [data-key=current]")).toHaveAttribute("aria-pressed", "true")
-  await expect(page.getByTestId("receivables-outstanding")).toHaveAttribute("data-cents", String(ageing.bookAgeing.buckets.current.cents))
-  await shot(page, "receivables-selected-bucket")
-
-  await page.goto("/finance")
-  await expect(right.locator("a[data-segment=days1to30]")).toHaveAttribute("href", "/finance/receivables?bucket=1-30")
-  if (ageing.bookAgeing.inFlight.cents > 0) await expect(right.locator("a[data-segment=inFlight]")).toHaveAttribute("href", "/finance/payments")
+  const chart = page.getByTestId("home-billed")
+  const todo = page.getByTestId("waiting-on-you")
+  await expect(chart.getByRole("figure", { name: "Billed vs collected" })).toBeVisible()
+  await expect(chart).toContainText(collectionTakeaway(billed.periods))
+  await expect(chart.locator("table caption")).toHaveCount(1)
+  const chartBox = (await chart.boundingBox())!
+  const todoBox = (await todo.boundingBox())!
+  expect(chartBox.y + chartBox.height).toBeLessThanOrEqual(todoBox.y + 1)
+  expect(Math.abs(chartBox.width - todoBox.width)).toBeLessThan(2)
+  await expect(page.getByRole("heading", { name: /^To do/ })).toBeVisible()
+  await expect(page.getByText("Waiting on you")).toHaveCount(0)
+  await expect(page.getByTestId("home-who-owes")).toHaveCount(0)
 })
 
-test("Who owes us lists the three clients owing the most overdue, each opening Receivables on that client", async ({ page }) => {
-  const top = await model(page, (db) => topOverdueClients(clientAgeing(db, FINANCE, new Date()).clients))
-  expect(top.length).toBeGreaterThan(0)
-  const rows = page.getByTestId("home-top-client")
-  await expect(rows).toHaveCount(top.length)
-  for (const [index, client] of top.entries()) {
-    await expect(rows.nth(index)).toHaveAttribute("data-company-id", client.companyId)
-    await expect(rows.nth(index).getByTestId("home-top-client-overdue")).toContainText(formatCents(client.overdueCents))
-    await expect(rows.nth(index).getByTestId("home-top-client-oldest")).toContainText(plural(client.oldestOverdueDays!, "day"))
-  }
-  await rows.first().getByTestId("home-top-client-open").click()
-  await expect(page).toHaveURL(`/finance/receivables?client=${top[0].companyId}`)
-  await expect(page.locator(`[data-testid=by-client] [data-key="${top[0].companyId}"]`)).toHaveAttribute("aria-pressed", "true")
-  await expect(page.getByTestId("filter-chip")).toHaveText([top[0].companyName])
-  await expect(page.getByTestId("receivables-overdue")).toHaveAttribute("data-cents", String(top[0].overdueCents))
-  for (const name of await page.getByTestId("invoice-client").allInnerTexts()) expect(name.trim()).toBe(top[0].companyName)
+test("the client filter narrows the figures, the chart and To do to one client, and All clients brings the rest back", async ({ page }) => {
+  const { clients, companies, ageing, waitingAll } = await model(page, (db) => {
+    const ageing = clientAgeing(db, FINANCE, new Date())
+    return { ageing, clients: ageing.clients, companies: listCompanyOptions(db, FINANCE), waitingAll: oldestWaitingPayments(db, FINANCE, new Date(), 50) }
+  })
+  const withPayments = [...new Set(waitingAll.payments.map((p) => p.companyId))]
+  expect(withPayments.length).toBeGreaterThan(1)
+  const target = companies.find((c) => c.id === withPayments[0])!
+  const mine = waitingAll.payments.filter((p) => p.companyId === target.id)
+  expect(mine.length).toBeLessThan(waitingAll.payments.length)
+  const overdue = ageingTotalsFor(ageing, target.id).overdueCents
+  expect(clients.length).toBeGreaterThan(0)
+
+  const filter = page.getByTestId("home-client-filter")
+  await expect(filter).toContainText("All clients")
+  await filter.click()
+  await page.getByRole("option", { name: target.name, exact: true }).click()
+  await expect(page).toHaveURL(`/finance?client=${target.id}`)
+  await expect(filter).toContainText(target.name)
+  await shot(page, "client-filter")
+
+  await expect(figureAmount(page, "to-settle")).toHaveAttribute("data-cents", String(mine.reduce((n, p) => n + p.amountCents, 0)))
+  if (overdue > 0) await expect(figureAmount(page, "overdue")).toHaveAttribute("data-cents", String(overdue))
+  else await expect(page.getByTestId("figure-overdue-text")).toHaveText("Nothing overdue")
+  await expect(page.getByTestId("figure-to-settle-link")).toHaveAttribute("href", `/finance/payments?client=${target.id}`)
+  await expect(page.getByTestId("figure-overdue-link")).toHaveAttribute("href", `/finance/receivables?client=${target.id}`)
+
+  const billed = await model(page, (db) => billedVsCollectedByPeriod(db, FINANCE, new Date(), 8, target.id))
+  await expect(page.getByTestId("home-billed")).toContainText(collectionTakeaway(billed.periods))
+
+  const todo = page.getByTestId("waiting-on-you")
+  await expect(todo.getByTestId("waiting-count")).toHaveText(String(mine.length))
+  const names = await todo.getByTestId("waiting-client").allInnerTexts()
+  expect(names.length).toBe(Math.min(5, mine.length))
+  for (const name of names) expect(name.trim()).toBe(target.name)
+  await todo.getByTestId("waiting-view-all").click()
+  await expect(page).toHaveURL(`/finance/payments?client=${target.id}`)
+  await expect(page.getByTestId("tab-count-to_settle")).toHaveText(`(${mine.length})`)
+
+  await page.goto(`/finance?client=${target.id}`)
+  await page.getByTestId("home-client-filter").click()
+  await page.getByRole("option", { name: "All clients" }).click()
+  await expect(page).toHaveURL(/\/finance$/)
+  await expect(page.getByTestId("waiting-count")).toHaveText(String(waitingAll.total.count))
+  await page.goto("/finance?client=no_such_company")
+  await expect(page.getByTestId("home-client-filter")).toContainText("All clients")
+  await expect(page.getByTestId("waiting-count")).toHaveText(String(waitingAll.total.count))
 })
 
-test("Waiting on you is the top of To settle: deposits first, then the oldest, with the full count", async ({ page }) => {
+test("To do is the top of To settle: deposits first, then the oldest, with the full count", async ({ page }) => {
   const order = toSettleOrder()
   const section = page.getByTestId("waiting-on-you")
   await expect(section.getByTestId("waiting-count")).toHaveText(String(order.length))
@@ -187,7 +207,7 @@ test("Waiting on you is the top of To settle: deposits first, then the oldest, w
   expect(ids).toEqual(order.slice(0, 5).map((row) => row.id))
   expect(order.some((row) => row.deposit)).toBe(true)
   await expect(rows.first()).toHaveAttribute("data-deposit", "true")
-  await expect(rows.first().getByTestId("waiting-detail")).toHaveText(/^Deposit · starts \w{3} \d{1,2} · /)
+  await expect(rows.first().getByTestId("waiting-invoice")).toHaveText(/^INV-|^\d+ invoices$/)
 
   await page.goto("/finance/payments")
   const listed = await page.getByTestId("payment-row").evaluateAll((items) => items.slice(0, 5).map((item) => item.getAttribute("data-payment-id")))
@@ -227,13 +247,13 @@ test("Settle from the Home: the row leaves, and To settle and the nav count go d
   await expect(page.locator(`[data-testid=waiting-row][data-payment-id="${id}"]`)).toHaveCount(0)
   await expect(page.getByTestId("waiting-settled")).toHaveText(`Settled ${amount} from ${client.replace(/\.?$/, ".")}`)
   await expect(page.getByTestId("waiting-count")).toHaveText(String(before.count - 1))
-  await expect(tileValue(page, "to-settle")).toHaveText(`${plural(before.count - 1, "payment")} · ${formatCents(before.cents - cents(amount))}`)
+  await expect(figureAmount(page, "to-settle")).toHaveAttribute("data-cents", String(before.cents - cents(amount)))
   await expect(navPayments(page)).toContainText(String(before.count - 1))
   expect(initiated().count).toBe(before.count - 1)
   await shot(page, "after-settle")
 })
 
-test("Ready to bill offers Run billing while invoices are due, agreeing with Billing run, and it navigates there", async ({ page }) => {
+test("Ready to bill states the money while invoices are due, agreeing with Billing run, and its link navigates there", async ({ page }) => {
   // The seed bills through today, so make three payroll invoices of the last run due again.
   const removed = writeLiveDb((db) => {
     const ids = (
@@ -259,26 +279,27 @@ test("Ready to bill offers Run billing while invoices are due, agreeing with Bil
   await page.reload()
   const preview = await model(page, (db) => previewBillingRun(db, FINANCE, new Date()))
   expect(preview.wouldIssue.count).toBe(3)
-  await expect(tileValue(page, "ready-to-bill")).toHaveText(`3 invoices · ${formatCents(preview.wouldIssue.totalCents)}`)
+  await expect(figureAmount(page, "ready-to-bill")).toHaveAttribute("data-cents", String(preview.wouldIssue.totalCents))
+  await expect(page.getByTestId("figure-ready-to-bill-text")).toHaveText("ready to bill")
   await shot(page, "ready-to-bill")
-  await page.getByTestId("tile-run-billing").click()
+  await page.getByTestId("figure-ready-to-bill-link").click()
   await expect(page).toHaveURL(/\/finance\/billing$/)
   await expect(page.getByTestId("run-billing")).toHaveText("Run billing · 3 invoices")
   await expect(page.getByTestId("figure-total")).toContainText(formatCents(preview.wouldIssue.totalCents))
   await expect(page.getByTestId("run-result")).toHaveCount(0)
 })
 
-test("with everything settled, Waiting on you says so quietly and To settle reads None", async ({ page }) => {
+test("with everything settled, To do says so quietly and To settle reads nothing", async ({ page }) => {
   const section = page.getByTestId("waiting-on-you")
   for (let left = initiated().count; left > 0; left -= 1) {
     await section.getByTestId("waiting-settle").first().click()
     await page.getByTestId("settle-dialog").getByTestId("action-confirm").click()
     await expect(section.getByTestId("waiting-count")).toHaveText(String(left - 1))
   }
-  await expect(section.getByTestId("waiting-empty")).toHaveText("Nothing waiting on you.")
+  await expect(section.getByTestId("waiting-empty")).toHaveText("You're all caught up.")
   await expect(section.getByTestId("waiting-row")).toHaveCount(0)
-  await expect(tileValue(page, "to-settle")).toHaveText("None")
-  await expect(page.getByTestId("tile-to-settle-context")).toHaveText("Nothing waiting on you")
+  await expect(figureAmount(page, "to-settle")).toHaveCount(0)
+  await expect(page.getByTestId("figure-to-settle-text")).toHaveText("Nothing to settle")
   await expect(navPayments(page)).not.toContainText(/\d/)
   await shot(page, "empty")
 })

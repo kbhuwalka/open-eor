@@ -99,7 +99,7 @@ The specialist home (`SpecialistHome`, `staffHome`) is the role's whole queue in
 - **Drawer.** A click anywhere on a row opens a right-hand drawer (the conventions of ui-guidelines C45, in its own components until it moves onto `DrawerShell`) with the task, the person and client, when the person starts and when the task is due, why it matters (at risk, blocks the start date), the template's description, Previous and Next to work down the list, and the action that opens the task's own page (`row.href`, labelled by the registry). Modified clicks (cmd, ctrl, middle) still go to the page. `j` and `k` (or the arrow keys) move a cursor and Enter opens the row under it.
 - **Filters.** Search, Client, Task and Status ([task-inbox.md](./task-inbox.md) §3), all in the URL, so the home is not paged: `staffHome` returns the whole filtered queue (a role queue is team-sized) with each person's start date.
 
-Finance has no task list: its Home is action tiles and "Waiting on you" ([finance-portal.md](./finance-portal.md) §2.6).
+Finance has no task list: its Home is a figures line, a chart and "To do" ([finance-portal.md](./finance-portal.md) §2.6).
 
 ## 7. Out of scope
 

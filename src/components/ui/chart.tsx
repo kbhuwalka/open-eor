@@ -11,11 +11,12 @@ import { createContext, useContext, useId, type ReactNode } from "react"
 import { cn } from "cn"
 
 /** The chart colour roles. Two or three per chart; status meaning only where the data has it. */
-export type ChartTone = "brand" | "positive" | "neutral" | "caution" | "alert" | "critical" | "pending"
+export type ChartTone = "brand" | "brandSoft" | "positive" | "neutral" | "caution" | "alert" | "critical" | "pending"
 
 /** The fill of a tone, for SVG `fill` / `stroke` attributes. */
 export const CHART_FILL: Record<ChartTone, string> = {
   brand: "var(--chart-brand)",
+  brandSoft: "var(--chart-brand-soft)",
   positive: "var(--chart-positive)",
   neutral: "var(--chart-neutral)",
   caution: "var(--chart-caution)",
@@ -26,6 +27,7 @@ export const CHART_FILL: Record<ChartTone, string> = {
 
 const SOLID_SWATCH: Record<ChartTone, string> = {
   brand: "bg-chart-brand",
+  brandSoft: "bg-chart-brand-soft",
   positive: "bg-chart-positive",
   neutral: "bg-chart-neutral",
   caution: "bg-chart-caution",
@@ -36,6 +38,7 @@ const SOLID_SWATCH: Record<ChartTone, string> = {
 
 const HATCHED_SWATCH: Record<ChartTone, string> = {
   brand: "border border-chart-brand bg-[repeating-linear-gradient(135deg,var(--chart-brand)_0_1.5px,transparent_1.5px_4px)]",
+  brandSoft: "border border-chart-brand-soft bg-[repeating-linear-gradient(135deg,var(--chart-brand-soft)_0_1.5px,transparent_1.5px_4px)]",
   positive: "border border-chart-positive bg-[repeating-linear-gradient(135deg,var(--chart-positive)_0_1.5px,transparent_1.5px_4px)]",
   neutral: "border border-chart-neutral bg-[repeating-linear-gradient(135deg,var(--chart-neutral)_0_1.5px,transparent_1.5px_4px)]",
   caution: "border border-chart-caution bg-[repeating-linear-gradient(135deg,var(--chart-caution)_0_1.5px,transparent_1.5px_4px)]",
@@ -147,10 +150,37 @@ export function ChartLegendList({ items, className }: { items: readonly ChartLeg
 
 /**
  * Title and one-line takeaway over a chart. The title names the chart (`h3`); the takeaway is the
- * sentence the reader should leave with, so it carries the weight.
+ * sentence the reader should leave with, so it carries the weight. `variant="section"` is the
+ * Finance Home's: the title as a `text-base font-semibold` section heading with the takeaway muted
+ * beside it, a hairline under the row (the same head as To do), and no box.
  */
-export function ChartFrame({ title, takeaway, children, className }: { title: string; takeaway: ReactNode; children: ReactNode; className?: string }) {
+export function ChartFrame({
+  title,
+  takeaway,
+  children,
+  className,
+  variant = "card",
+}: {
+  title: string
+  takeaway: ReactNode
+  children: ReactNode
+  className?: string
+  variant?: "card" | "section"
+}) {
   const titleId = useId()
+  if (variant === "section") {
+    return (
+      <figure aria-labelledby={titleId} className={cn("flex min-w-0 flex-col gap-2", className)}>
+        <figcaption className="flex min-h-8 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          <h3 id={titleId} className="text-base font-semibold">
+            {title}
+          </h3>
+          <p className="text-sm text-muted-foreground">{takeaway}</p>
+        </figcaption>
+        <div className="flex flex-col gap-3 border-t border-border pt-4">{children}</div>
+      </figure>
+    )
+  }
   return (
     <figure aria-labelledby={titleId} className={cn("flex min-w-0 flex-col gap-3", className)}>
       <figcaption className="flex flex-col gap-0.5">

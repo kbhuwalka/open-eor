@@ -3,14 +3,15 @@ import { describe, expect, it } from "vitest"
 import type { AgeingTotals, ClientAgeing, ClientAgeingRow } from "@/server/finance-insights"
 
 import {
+  ageTakeaway,
   BUCKET_PARAM,
   bucketRows,
   bucketSegmentHrefs,
   clearedReceivablesHref,
-  clientRows,
   compareChaseOrder,
   daysLabel,
   daysLate,
+  owingClients,
   parseBucketParam,
   parseReceivablesQuery,
   receivablesChips,
@@ -101,7 +102,7 @@ describe("the URL", () => {
     expect(receivablesHref({ client: "acme" })).toBe("/finance/receivables?client=acme")
     expect(receivablesHref({ client: "acme" }, "bucket=1-30&page=3&size=25")).toBe("/finance/receivables?bucket=1-30&size=25&client=acme")
     expect(receivablesHref({ bucket: null }, "?bucket=1-30&client=acme&page=2")).toBe("/finance/receivables?client=acme")
-    expect(clearedReceivablesHref("bucket=1-30&client=acme&size=50&page=4")).toBe("/finance/receivables?size=50")
+    expect(clearedReceivablesHref("bucket=1-30&client=acme&size=50&page=4")).toBe("/finance/receivables?client=acme&size=50")
     expect(searchOf({ bucket: "1-30", client: undefined, x: ["a", "b"] })).toBe("bucket=1-30&x=a&x=b")
   })
 
@@ -157,7 +158,7 @@ describe("By age", () => {
     expect(rows[0].name).toBe("Current, not yet due: $40.00, 3 invoices")
   })
 
-  it("is drawn from the book filtered by the client, never by its own selection (crossfilter)", () => {
+  it("is drawn from the book filtered by the client, never by its own selection (it never filters itself)", () => {
     const unselected = bucketRows(BOOK, { bucket: null, client: "acme" })
     const selected = bucketRows(BOOK, { bucket: "days1to30", client: "acme" }, "bucket=1-30&client=acme")
     expect(unselected.map((row) => row.cents)).toEqual([3_000, 10_000, 0, 0])
@@ -172,70 +173,28 @@ describe("By age", () => {
   })
 })
 
-describe("By client", () => {
-  it("ranks clients by amount owed, without money in flight, in two parts", () => {
-    const rows = clientRows(BOOK, NONE)
-    expect(rows.map((row) => [row.key, row.cents, row.count])).toEqual([
-      ["acme", 13_000, 5],
-      ["bright", 6_000, 2],
-      ["harbor", 1_000, 1],
-    ])
-    expect(rows[0].segments).toEqual([
-      { tone: "alert", cents: 10_000 },
-      { tone: "neutral", cents: 3_000 },
-    ])
-    expect(rows[0].name).toBe("Acme Robotics: $130.00, $100.00 overdue, 5 invoices")
-    expect(rows[2].name).toBe("Harbor Foods Co.: $10.00, nothing overdue, 1 invoice")
-    expect(rows[0].href).toBe("/finance/receivables?client=acme")
+describe("the By age takeaway", () => {
+  it("says how much of what is owed is late", () => {
+    expect(ageTakeaway(bucketRows(BOOK, NONE))).toBe("80% overdue of $200 outstanding")
+    expect(ageTakeaway(bucketRows(BOOK, { bucket: null, client: "harbor" }))).toBe("0% overdue of $10 outstanding")
+    expect(ageTakeaway(bucketRows(BOOK, { bucket: null, client: "ghost" }, ""))).toBe("80% overdue of $200 outstanding")
+    expect(ageTakeaway([])).toBe("Nothing is owed.")
   })
+})
 
-  it("is drawn from the book filtered by the bucket, never by its own selection (crossfilter)", () => {
-    const rows = clientRows(BOOK, { bucket: "current", client: null }, "bucket=current")
-    expect(rows.map((row) => [row.key, row.cents])).toEqual([
-      ["acme", 3_000],
-      ["harbor", 1_000],
-    ])
-    expect(rows[0].segments.map((s) => s.cents)).toEqual([0, 3_000])
-    expect(rows[0].href).toBe("/finance/receivables?bucket=current&client=acme")
-    const selected = clientRows(BOOK, { bucket: "current", client: "acme" }, "bucket=current&client=acme")
-    expect(selected.map((row) => row.cents)).toEqual(rows.map((row) => row.cents))
-    expect(selected[0]).toMatchObject({ selected: true, href: "/finance/receivables?bucket=current" })
-  })
-
-  it("keeps the selected client when the bucket leaves it nothing, so it can be cleared", () => {
-    const rows = clientRows(BOOK, { bucket: "days60plus", client: "acme" }, "bucket=60-plus&client=acme")
-    expect(rows.map((row) => [row.key, row.cents])).toEqual([
-      ["bright", 2_000],
-      ["acme", 0],
-    ])
-    expect(rows[1]).toMatchObject({ selected: true, href: "/finance/receivables?bucket=60-plus" })
-  })
-
-  it("folds clients past the limit into one N others row that links nowhere, never folding the selected one", () => {
-    const many = book(
-      Array.from({ length: 8 }, (_, i) => client(`c${i}`, `Client ${i}`, totals({ days1to30: { count: 1, cents: (8 - i) * 100 } }))),
-    )
-    const rows = clientRows(many, NONE)
-    expect(rows.map((row) => row.key)).toEqual(["c0", "c1", "c2", "c3", "c4", "others"])
-    expect(rows[5]).toMatchObject({ label: "3 others", cents: 600, count: 3, href: null, folded: true, selected: false })
-    expect(rows[5].segments).toEqual([
-      { tone: "alert", cents: 600 },
-      { tone: "neutral", cents: 0 },
-    ])
-
-    const pinned = clientRows(many, { bucket: null, client: "c7" })
-    expect(pinned.map((row) => row.key)).toEqual(["c0", "c1", "c2", "c3", "c4", "c7", "others"])
-    expect(pinned[6]).toMatchObject({ label: "2 others", cents: 500 })
-    expect(clientRows(book(many.clients.slice(0, 6)), NONE).map((row) => row.key)).toEqual(["c0", "c1", "c2", "c3", "c4", "c5"])
+describe("the Client filter's options", () => {
+  it("are the clients that owe something, by name", () => {
+    expect(owingClients(BOOK).map((option) => option.name)).toEqual(["Acme Robotics", "Brightwave Labs", "Harbor Foods Co."])
+    const paid = book([acme, client("zeta", "Zeta Co.", totals({}))])
+    expect(owingClients(paid)).toEqual([{ id: "acme", name: "Acme Robotics" }])
   })
 })
 
 describe("chips", () => {
-  it("one per selection, each removing only its own filter", () => {
-    expect(receivablesChips(BOOK, NONE)).toEqual([])
-    expect(receivablesChips(BOOK, { bucket: "days1to30", client: "acme" }, "bucket=1-30&client=acme&page=2")).toEqual([
+  it("is the selected age, removing only it; the client is the header filter's", () => {
+    expect(receivablesChips(NONE)).toEqual([])
+    expect(receivablesChips({ bucket: "days1to30" }, "bucket=1-30&client=acme&page=2")).toEqual([
       { key: "bucket", label: "1–30 days late", href: "/finance/receivables?client=acme" },
-      { key: "client", label: "Acme Robotics", href: "/finance/receivables?bucket=1-30" },
     ])
   })
 })

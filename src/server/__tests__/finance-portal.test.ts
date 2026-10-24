@@ -23,7 +23,7 @@ import {
   receivables,
   AGEING_BUCKETS,
 } from "../billing-queries"
-import { clientAgeing } from "../finance-insights"
+import { ageingTotalsFor, clientAgeing } from "../finance-insights"
 import { financeInvoicePdfInput, financeOverview, listCompanyOptions, overviewFrom, paymentStatusCounts } from "../finance-portal-queries"
 import { tasksForCase } from "../tasks"
 
@@ -309,7 +309,7 @@ describe("billing run and its preview", () => {
 })
 
 describe("receivables and the overview", () => {
-  it("the Home tiles agree with the Payments, Receivables and Billing run pages", () => {
+  it("the Home figures agree with the Payments, Receivables and Billing run pages", () => {
     const db = openDb()
     const actor = finance(db)
     const overview = financeOverview(db, actor, SEED_NOW)
@@ -329,6 +329,27 @@ describe("receivables and the overview", () => {
       nextIssueDate: preview.upcoming[0].issueDate,
     })
     expect(financeOverview(db, actor, SEED_NOW, { book: clientAgeing(db, actor, SEED_NOW).bookAgeing, preview })).toEqual(overview)
+  })
+
+  it("narrowed to one client, the figures are that client's and the clients add up to the book", () => {
+    const db = openDb()
+    const actor = finance(db)
+    const ageing = clientAgeing(db, actor, SEED_NOW)
+    const book = financeOverview(db, actor, SEED_NOW, { book: ageing.bookAgeing })
+    const each = listCompanyOptions(db, actor).map((company) =>
+      financeOverview(db, actor, SEED_NOW, { book: ageingTotalsFor(ageing, company.id), companyId: company.id }),
+    )
+    const sum = (pick: (overview: (typeof book)) => number) => each.reduce((n, overview) => n + pick(overview), 0)
+    expect(sum((o) => o.toSettle.count)).toBe(book.toSettle.count)
+    expect(sum((o) => o.toSettle.cents)).toBe(book.toSettle.cents)
+    expect(sum((o) => o.overdue.cents)).toBe(book.overdue.cents)
+    expect(sum((o) => o.overdue.count)).toBe(book.overdue.count)
+    expect(sum((o) => o.readyToBill.count)).toBe(book.readyToBill.count)
+    expect(sum((o) => o.readyToBill.cents)).toBe(book.readyToBill.cents)
+    expect(each.every((o) => o.readyToBill.nextIssueDate === book.readyToBill.nextIssueDate)).toBe(true)
+    const none = financeOverview(db, actor, SEED_NOW, { book: ageingTotalsFor(ageing, "no_such_company"), companyId: "no_such_company" })
+    expect(none.toSettle).toEqual({ count: 0, cents: 0, oldestInitiatedAt: null })
+    expect(none.overdue).toEqual({ count: 0, cents: 0, oldestDays: null })
   })
 
   it("settling a payment lowers To settle by that payment", () => {

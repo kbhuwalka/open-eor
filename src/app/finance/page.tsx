@@ -1,17 +1,20 @@
 import { cache, Suspense } from "react"
 
 import { requirePortalUser } from "@/auth"
-import { HomeBilledCard, HomeWhoOwesCard } from "@/components/finance-portal/home/home-charts"
-import { HomeTiles } from "@/components/finance-portal/home/home-tiles"
-import { WaitingOnYou } from "@/components/finance-portal/home/waiting-on-you"
-import { HomeChartsSkeleton, HomeTilesSkeleton, WaitingSkeleton } from "@/components/finance-portal/skeletons"
+import { ClientFilter } from "@/components/finance-portal/client-filter"
+import { FinanceTodo } from "@/components/finance-portal/home/finance-todo"
+import { HomeBilledCard } from "@/components/finance-portal/home/home-charts"
+import { HomeFigures } from "@/components/finance-portal/home/home-figures"
+import { HomeChartsSkeleton, HomeFiguresSkeleton, WaitingSkeleton } from "@/components/finance-portal/skeletons"
 import { PageHeader } from "@/components/page-header"
 import { getDb } from "@/db"
 import { businessDayOf } from "@/domain/business-time"
 import { DEFAULT_CHART_PERIODS } from "@/lib/finance-chart-view"
-import { homeDateLabel, WAITING_LIMIT } from "@/lib/finance-home-view"
-import { billedVsCollectedByPeriod, clientAgeing, oldestWaitingPayments } from "@/server/finance-insights"
-import { financeOverview } from "@/server/finance-portal-queries"
+import { HOME_PATH, homeDateLabel, parseHomeClient, WAITING_LIMIT } from "@/lib/finance-home-view"
+import { ageingTotalsFor, billedVsCollectedByPeriod, clientAgeing, oldestWaitingPayments } from "@/server/finance-insights"
+import { financeOverview, listCompanyOptions } from "@/server/finance-portal-queries"
+
+type SearchParams = Promise<Record<string, string | string[] | undefined>>
 
 /** One session, clock and database per request, shared by the Home's sections. */
 const homeRequest = cache(async () => {
@@ -19,13 +22,25 @@ const homeRequest = cache(async () => {
   return { user, db: getDb(), now: new Date() }
 })
 
-/** The book's ageing is read by the Overdue tile and by "Who owes us": once per request. */
+/** The clients to filter by, and the one `?client=` names (an unknown id is ignored, like any other bad value). */
+const homeScope = cache(async (searchParams: SearchParams) => {
+  const [{ db, user }, params] = await Promise.all([homeRequest(), searchParams])
+  const companies = listCompanyOptions(db, user)
+  const requested = parseHomeClient(params)
+  return { companies, client: companies.some((company) => company.id === requested) ? requested : null }
+})
+
+/** The book's ageing is read by the figures line: once per request. */
 const homeAgeing = cache(async () => {
   const { db, user, now } = await homeRequest()
   return clientAgeing(db, user, now)
 })
 
-export default function FinanceHomePage() {
+/**
+ * `/finance`: a figures line, billed vs collected across the page and To do (the payments to
+ * settle), all for every client or, with `?client=<companyId>`, for one.
+ */
+export default function FinanceHomePage({ searchParams }: { searchParams: SearchParams }) {
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
@@ -35,15 +50,20 @@ export default function FinanceHomePage() {
             <HomeDate />
           </Suspense>
         }
+        actions={
+          <Suspense fallback={null}>
+            <HomeFilter searchParams={searchParams} />
+          </Suspense>
+        }
       />
-      <Suspense fallback={<HomeTilesSkeleton />}>
-        <Tiles />
+      <Suspense fallback={<HomeFiguresSkeleton />}>
+        <Figures searchParams={searchParams} />
       </Suspense>
       <Suspense fallback={<HomeChartsSkeleton />}>
-        <Charts />
+        <Chart searchParams={searchParams} />
       </Suspense>
       <Suspense fallback={<WaitingSkeleton />}>
-        <Waiting />
+        <Todo searchParams={searchParams} />
       </Suspense>
     </div>
   )
@@ -54,23 +74,22 @@ async function HomeDate() {
   return <span data-testid="home-date">{homeDateLabel(businessDayOf(now))}</span>
 }
 
-async function Tiles() {
-  const [{ db, user, now }, ageing] = await Promise.all([homeRequest(), homeAgeing()])
-  return <HomeTiles overview={financeOverview(db, user, now, { book: ageing.bookAgeing })} />
+async function HomeFilter({ searchParams }: { searchParams: SearchParams }) {
+  const { companies, client } = await homeScope(searchParams)
+  return <ClientFilter companies={companies} value={client} path={HOME_PATH} testId="home-client-filter" />
 }
 
-async function Charts() {
-  const [{ db, user, now }, ageing] = await Promise.all([homeRequest(), homeAgeing()])
-  const billed = billedVsCollectedByPeriod(db, user, now, DEFAULT_CHART_PERIODS)
-  return (
-    <div className="grid gap-6 lg:grid-cols-5">
-      <HomeBilledCard billed={billed} className="lg:col-span-3" />
-      <HomeWhoOwesCard ageing={ageing} className="lg:col-span-2" />
-    </div>
-  )
+async function Figures({ searchParams }: { searchParams: SearchParams }) {
+  const [{ db, user, now }, ageing, { client }] = await Promise.all([homeRequest(), homeAgeing(), homeScope(searchParams)])
+  return <HomeFigures overview={financeOverview(db, user, now, { book: ageingTotalsFor(ageing, client), companyId: client })} client={client} />
 }
 
-async function Waiting() {
-  const { db, user, now } = await homeRequest()
-  return <WaitingOnYou waiting={oldestWaitingPayments(db, user, now, WAITING_LIMIT)} today={businessDayOf(now)} />
+async function Chart({ searchParams }: { searchParams: SearchParams }) {
+  const [{ db, user, now }, { client }] = await Promise.all([homeRequest(), homeScope(searchParams)])
+  return <HomeBilledCard billed={billedVsCollectedByPeriod(db, user, now, DEFAULT_CHART_PERIODS, client)} />
+}
+
+async function Todo({ searchParams }: { searchParams: SearchParams }) {
+  const [{ db, user, now }, { client }] = await Promise.all([homeRequest(), homeScope(searchParams)])
+  return <FinanceTodo waiting={oldestWaitingPayments(db, user, now, WAITING_LIMIT, client)} today={businessDayOf(now)} client={client} />
 }

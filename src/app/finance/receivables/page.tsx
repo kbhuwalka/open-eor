@@ -1,6 +1,7 @@
-import { Suspense } from "react"
+import { cache, Suspense } from "react"
 
 import { requirePortalUser } from "@/auth"
+import { ClientFilter } from "@/components/finance-portal/client-filter"
 import { NothingOwed } from "@/components/finance-portal/receivables/receivables-figures"
 import { ReceivablesDashboard } from "@/components/finance-portal/receivables/receivables-dashboard"
 import { ReceivablesSkeleton } from "@/components/finance-portal/skeletons"
@@ -9,8 +10,9 @@ import { getDb } from "@/db"
 import {
   bucketRows,
   clearedReceivablesHref,
-  clientRows,
+  owingClients,
   parseReceivablesQuery,
+  RECEIVABLES_PATH,
   receivablesChips,
   receivablesFigures,
   searchOf,
@@ -21,11 +23,29 @@ import { financeReceivablesPage } from "@/server/finance-lists"
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>
 
-/** `/finance/receivables`, filtered by `?bucket=current|1-30|31-60|60-plus` and `?client=<companyId>` (both, combined). */
+/** One session, clock, database and read of the book per request, shared by the filter and the page. */
+const receivablesBook = cache(async () => {
+  const user = await requirePortalUser("finance")
+  const db = getDb()
+  const now = new Date()
+  return { user, db, now, ageing: clientAgeing(db, user, now) }
+})
+
+/**
+ * `/finance/receivables`, filtered by `?client=<companyId>` (the header's Client filter) and
+ * `?bucket=current|1-30|31-60|60-plus` (a By age row), combined.
+ */
 export default function FinanceReceivablesPage({ searchParams }: { searchParams: SearchParams }) {
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader title="Receivables" />
+    <div className="flex flex-col gap-8">
+      <PageHeader
+        title="Receivables"
+        actions={
+          <Suspense fallback={null}>
+            <ReceivablesFilter searchParams={searchParams} />
+          </Suspense>
+        }
+      />
       <Suspense fallback={<ReceivablesSkeleton />}>
         <Receivables searchParams={searchParams} />
       </Suspense>
@@ -33,12 +53,17 @@ export default function FinanceReceivablesPage({ searchParams }: { searchParams:
   )
 }
 
-/** The book is read once (`clientAgeing`): the figures and both charts derive from it; the table is its invoices. */
+/** The clients that owe money, and the one `?client=` names; nothing while the whole book owes nothing. */
+async function ReceivablesFilter({ searchParams }: { searchParams: SearchParams }) {
+  const [{ ageing }, params] = await Promise.all([receivablesBook(), searchParams])
+  if (ageing.bookAgeing.outstandingCents === 0) return null
+  const { client } = withKnownClient(parseReceivablesQuery(params), ageing)
+  return <ClientFilter companies={owingClients(ageing)} value={client} path={RECEIVABLES_PATH} current={searchOf(params)} testId="receivables-client-filter" />
+}
+
+/** The book is read once (`clientAgeing`): the figures and By age derive from it; the table is its invoices. */
 async function Receivables({ searchParams }: { searchParams: SearchParams }) {
-  const [user, params] = await Promise.all([requirePortalUser("finance"), searchParams])
-  const db = getDb()
-  const now = new Date()
-  const ageing = clientAgeing(db, user, now)
+  const [{ user, db, now, ageing }, params] = await Promise.all([receivablesBook(), searchParams])
   if (ageing.bookAgeing.outstandingCents === 0) return <NothingOwed inFlightCents={ageing.bookAgeing.inFlight.cents} />
 
   const query = withKnownClient(parseReceivablesQuery(params), ageing)
@@ -47,8 +72,7 @@ async function Receivables({ searchParams }: { searchParams: SearchParams }) {
     <ReceivablesDashboard
       figures={receivablesFigures(ageing, query)}
       byAge={bucketRows(ageing, query, current)}
-      byClient={clientRows(ageing, query, current)}
-      chips={receivablesChips(ageing, query, current)}
+      chips={receivablesChips(query, current)}
       clearHref={clearedReceivablesHref(current)}
       table={financeReceivablesPage(db, user, query, now)}
     />

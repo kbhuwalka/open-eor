@@ -67,50 +67,57 @@ export function InvoicesSkeleton() {
   )
 }
 
-/** Receivables: the figures line, the two bar-list cards (four rows each), then the table's header band over rows. */
+/** Receivables: the figures line, the By age section (four rows), then the table's heading and its header band over rows. */
 export function ReceivablesSkeleton() {
   return (
-    <div className="flex flex-col gap-6" aria-busy data-testid="finance-skeleton">
+    <div className="flex flex-col gap-8" aria-busy data-testid="finance-skeleton">
       <div className="flex items-baseline gap-3">
         <Skeleton className="h-4 w-40" />
         <Skeleton className="h-4 w-32" />
         <Skeleton className="h-4 w-28" />
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        {[0, 1].map((card) => (
-          <div key={card} className="flex flex-col gap-3 rounded-lg border border-border p-4">
-            <Skeleton className="mx-2.5 h-3 w-16" />
-            {[0, 1, 2, 3].map((row) => (
-              <div key={row} className="flex flex-col gap-1.5 px-2.5 py-2">
-                <div className="flex justify-between gap-3">
-                  <Skeleton className="h-4 w-28" />
-                  <Skeleton className="h-4 w-20" />
-                </div>
-                <Skeleton className="h-2 w-full" />
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-      <div className="overflow-hidden rounded-lg border border-border">
-        <div className="flex h-10 items-center gap-6 border-b border-border bg-muted/60 px-3">
-          <Skeleton className="h-3 w-28" />
-          <Skeleton className="hidden h-3 w-28 md:block" />
-          <Skeleton className="hidden h-3 w-32 md:block" />
-          <Skeleton className="h-3 w-14" />
-          <Skeleton className="h-3 w-20" />
-          <Skeleton className="ml-auto h-3 w-20" />
+      <div className="flex flex-col gap-2">
+        <div className="flex h-8 items-center gap-3">
+          <Skeleton className="h-5 w-16" />
+          <Skeleton className="h-4 w-48" />
         </div>
-        {Array.from({ length: 10 }, (_, i) => (
-          <div key={i} className="flex h-11 items-center gap-6 border-b border-border px-3 last:border-b-0">
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="hidden h-4 w-28 md:block" />
-            <Skeleton className="hidden h-4 w-32 md:block" />
-            <Skeleton className="h-4 w-14" />
-            <Skeleton className="h-4 w-20" />
-            <Skeleton className="ml-auto h-4 w-20" />
+        <div className="flex flex-col gap-0.5 border-t border-border pt-4">
+          {[0, 1, 2, 3].map((row) => (
+            <div key={row} className="flex flex-col gap-1.5 py-2">
+              <div className="flex justify-between gap-3">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-4 w-20" />
+              </div>
+              <Skeleton className="h-2 w-full" />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="flex flex-col gap-3">
+        <div className="flex h-8 items-center">
+          <Skeleton className="h-5 w-36" />
+        </div>
+        <div className="overflow-hidden rounded-lg border border-border">
+          <div className="flex h-10 items-center gap-6 border-b border-border bg-muted/60 px-3">
+            <Skeleton className="h-3 w-28" />
+            <Skeleton className="hidden h-3 w-28 md:block" />
+            <Skeleton className="h-3 w-14" />
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="ml-auto h-3 w-20" />
           </div>
-        ))}
+          {Array.from({ length: 10 }, (_, i) => (
+            <div key={i} className="flex h-[61px] items-center gap-6 border-b border-border px-3 last:border-b-0">
+              <div className="flex flex-col gap-1.5">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-3 w-36" />
+              </div>
+              <Skeleton className="hidden h-4 w-28 md:block" />
+              <Skeleton className="h-4 w-14" />
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="ml-auto h-4 w-20" />
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )
@@ -166,50 +173,33 @@ export function BillingRunSkeleton() {
   )
 }
 
-/** Home row 1: the three tiles in one card, side by side from `lg`. */
-export function HomeTilesSkeleton() {
+/** Home row 1: the figures line. */
+export function HomeFiguresSkeleton() {
   return (
-    <div className="grid overflow-hidden rounded-lg border border-border lg:grid-cols-3" aria-busy data-testid="home-tiles-skeleton">
-      {[0, 1, 2].map((i) => (
-        <div key={i} className="flex flex-col gap-2 px-5 py-4 not-first:border-t not-first:border-border lg:not-first:border-t-0 lg:not-first:border-l">
-          <Skeleton className="h-3 w-20" />
-          <Skeleton className="h-6 w-48" />
-          <Skeleton className="h-3 w-24" />
-          <Skeleton className="mt-2 h-4 w-28" />
-        </div>
-      ))}
+    <div className="flex items-baseline gap-3" aria-busy data-testid="home-figures-skeleton">
+      <Skeleton className="h-4 w-32" />
+      <Skeleton className="h-4 w-28" />
+      <Skeleton className="h-4 w-36" />
     </div>
   )
 }
 
-/** Home row 2: billed vs collected (3/5) beside the ageing bar and its top clients (2/5). */
+/** Home row 2: billed vs collected, full width: a section head over a hairline and the plot. */
 export function HomeChartsSkeleton() {
   return (
-    <div className="grid gap-6 lg:grid-cols-5" aria-busy data-testid="home-charts-skeleton">
-      <div className="flex flex-col gap-3 rounded-lg border border-border p-5 lg:col-span-3">
-        <Skeleton className="h-3 w-40" />
-        <Skeleton className="h-4 w-72" />
-        <Skeleton className="h-60 w-full" />
+    <div className="flex flex-col gap-2" aria-busy data-testid="home-charts-skeleton">
+      <div className="flex h-8 items-center gap-3">
+        <Skeleton className="h-5 w-36" />
+        <Skeleton className="h-4 w-44" />
       </div>
-      <div className="flex flex-col gap-3 rounded-lg border border-border p-5 lg:col-span-2">
-        <Skeleton className="h-3 w-24" />
-        <Skeleton className="h-4 w-56" />
-        <Skeleton className="h-16 w-full" />
-        <div className="mt-1 border-t border-border">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="flex h-10 items-center gap-3 border-b border-border px-2">
-              <Skeleton className="h-4 flex-1" />
-              <Skeleton className="h-4 w-24" />
-              <Skeleton className="h-4 w-12" />
-            </div>
-          ))}
-        </div>
+      <div className="border-t border-border pt-4">
+        <Skeleton className="h-60 w-full" />
       </div>
     </div>
   )
 }
 
-/** Home row 3: the "Waiting on you" header and five rows. */
+/** Home row 3: the To do header and five rows. */
 export function WaitingSkeleton() {
   return (
     <div className="flex flex-col gap-2" aria-busy data-testid="waiting-skeleton">
@@ -217,14 +207,15 @@ export function WaitingSkeleton() {
         <Skeleton className="h-4 w-32" />
         <Skeleton className="h-4 w-16" />
       </div>
-      <div className="border-t border-border">
+      <div className="overflow-hidden rounded-lg border border-border">
+        <div className="h-10 border-b border-border bg-muted/60" />
         {[0, 1, 2, 3, 4].map((i) => (
-          <div key={i} className="flex h-12 items-center gap-3 border-b border-border px-2">
+          <div key={i} className="flex h-[61px] items-center gap-3 border-b border-border px-3 last:border-0">
             <div className="flex flex-1 flex-col gap-1.5">
-              <Skeleton className="h-4 w-40" />
-              <Skeleton className="h-3 w-56" />
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-3 w-40" />
             </div>
-            <Skeleton className="h-4 w-12" />
+            <Skeleton className="h-4 w-16" />
             <Skeleton className="h-4 w-24" />
             <Skeleton className="h-8 w-16" />
           </div>

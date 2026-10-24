@@ -14,7 +14,6 @@ import type { StaffInvoiceRow } from "@/lib/finance-staff-view"
 import {
   bucketRows,
   clearedReceivablesHref,
-  clientRows,
   receivablesChips,
   receivablesFigures,
   type ReceivablesQuery,
@@ -120,28 +119,26 @@ describe("BarList", () => {
     expect(onNavigate).toHaveBeenCalledTimes(2)
   })
 
-  it("draws each row's parts in status tones, scaled to the longest row", () => {
-    render(<BarList title="By client" rows={clientRows(ageing, none)} rowHeader="Client" emptyMessage="None." />)
-    const [acme, brightwave] = screen.getAllByTestId("bar-list-row")
-    expect(acme).toHaveAttribute("data-key", "acme")
-    const tones = [...acme.querySelectorAll("[data-tone]")].map((rect) => rect.getAttribute("data-tone"))
-    expect(tones).toEqual(["alert", "neutral"])
-    expect(brightwave.querySelectorAll("[data-tone]")).toHaveLength(1)
+  it("draws each row's bar in its status tone, scaled to the longest row", () => {
+    render(<BarList title="By age" rows={bucketRows(ageing, none)} rowHeader="Days late" emptyMessage="Nothing is owed." />)
+    const [current, late] = screen.getAllByTestId("bar-list-row")
+    expect(current).toHaveAttribute("data-key", "current")
+    expect([...current.querySelectorAll("[data-tone]")].map((rect) => rect.getAttribute("data-tone"))).toEqual(["neutral"])
+    expect([...late.querySelectorAll("[data-tone]")].map((rect) => rect.getAttribute("data-tone"))).toEqual(["caution"])
     const clipOf = (row: HTMLElement) => row.querySelector("clipPath rect")!.getAttribute("width")
-    expect(clipOf(acme)).toBe("100.000%")
-    expect(parseFloat(clipOf(brightwave)!)).toBeLessThan(100)
+    expect(clipOf(late)).toBe("100.000%")
+    expect(parseFloat(clipOf(current)!)).toBeLessThan(100)
   })
 
-  it("folds clients past the limit into one row that filters nothing", () => {
-    const many = ageingOf(Array.from({ length: 8 }, (_, index) => client(`c${index}`, `Client ${index}`, (8 - index) * 10_000, 0)))
-    render(<BarList title="By client" rows={clientRows(many, none)} rowHeader="Client" emptyMessage="None." />)
-    const rows = screen.getAllByTestId("bar-list-row")
-    expect(rows).toHaveLength(6)
-    const others = rows[5]
-    expect(others).toHaveAttribute("data-folded")
-    expect(others.tagName).toBe("DIV")
-    expect(others).toHaveTextContent("3 others")
-    expect(screen.getAllByRole("button")).toHaveLength(5)
+  it("as a section has the heading with its takeaway beside it and no card", () => {
+    render(
+      <BarList title="By age" variant="section" takeaway="99% overdue of $1M outstanding" rows={bucketRows(ageing, none)} rowHeader="Days late" emptyMessage="Nothing is owed." testId="by-age" />,
+    )
+    const heading = screen.getByRole("heading", { name: "By age" })
+    expect(heading).toHaveClass("text-base", "font-semibold")
+    expect(screen.getByText("99% overdue of $1M outstanding")).toHaveClass("text-muted-foreground")
+    expect(screen.getByTestId("by-age")).not.toHaveClass("border")
+    expect(screen.getAllByTestId("bar-list-row")).toHaveLength(4)
   })
 
   it("has a hidden table of its rows, and the empty state when nothing is drawn", () => {
@@ -223,7 +220,7 @@ describe("InvoicesTable, receivables variant", () => {
     const rows = [invoice("a", "2026-10-07"), invoice("b", "2026-10-23"), invoice("c", TODAY), invoice("d", "2026-10-30")]
     render(<InvoicesTable variant="receivables" rows={rows} today={TODAY} cursor={null} hrefOf={(id) => `/x/${id}`} onOpen={vi.fn()} />)
     const table = screen.getByTestId("receivables-table")
-    expect(within(table).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual(["Invoice", "Person", "Client", "Due", "Days late", "Amount"])
+    expect(within(table).getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual(["Invoice", "Person", "Due", "Days late", "Amount"])
     expect(within(table).queryByTestId("invoice-status")).toBeNull()
     const cells = within(table).getAllByTestId("invoice-days-late")
     expect(cells.map((cell) => cell.textContent)).toEqual(["17 days late", "1 day late", "due today", "in 6 days"])
@@ -247,23 +244,36 @@ describe("ReceivablesDashboard", () => {
       <ReceivablesDashboard
         figures={receivablesFigures(ageing, query)}
         byAge={bucketRows(ageing, query, current)}
-        byClient={clientRows(ageing, query, current)}
-        chips={receivablesChips(ageing, query, current)}
+        chips={receivablesChips(query, current)}
         clearHref={clearedReceivablesHref(current)}
         table={tableOf(rows)}
       />,
     )
   }
 
-  it("shows a chip per selection that removes only its own filter, and Clear", async () => {
+  it("is the figures, the By age section and the Unpaid invoices table with its count, in that order", () => {
+    renderDashboard(none, "", [invoice("a", "2026-10-07"), invoice("b", "2026-10-09")])
+    const figures = screen.getByTestId("receivables-figures")
+    const byAge = screen.getByTestId("by-age")
+    const invoices = screen.getByTestId("receivables-invoices")
+    expect(figures.compareDocumentPosition(byAge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(byAge.compareDocumentPosition(invoices) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByRole("heading", { name: "By age" })).toHaveClass("text-base", "font-semibold")
+    expect(screen.getByText("99% overdue of $219K outstanding")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Unpaid invoices 2" })).toHaveClass("text-base", "font-semibold")
+    expect(screen.getByTestId("receivables-count")).toHaveTextContent("2")
+    expect(screen.queryByTestId("by-client")).toBeNull()
+  })
+
+  it("shows a chip for the selected age that removes only it, and Clear", async () => {
     renderDashboard({ bucket: "days1to30", client: "acme" }, "bucket=1-30&client=acme&size=25", [invoice("a", "2026-10-07")])
     const chips = screen.getAllByTestId("filter-chip")
-    expect(chips.map((chip) => chip.textContent)).toEqual(["1–30 days late", "Acme Robotics"])
+    expect(chips.map((chip) => chip.textContent)).toEqual(["1–30 days late"])
     const removeBucket = screen.getByRole("link", { name: "Remove filter: 1–30 days late" })
     expect(removeBucket).toHaveAttribute("href", "/finance/receivables?client=acme&size=25")
     await userEvent.click(removeBucket)
     expect(nav.push).toHaveBeenLastCalledWith("/finance/receivables?client=acme&size=25", { scroll: false })
-    expect(screen.getByTestId("clear-filters")).toHaveAttribute("href", "/finance/receivables?size=25")
+    expect(screen.getByTestId("clear-filters")).toHaveAttribute("href", "/finance/receivables?client=acme&size=25")
   })
 
   it("has no chips without a filter, and a row opens the invoice in the Invoices drawer", async () => {
@@ -277,7 +287,7 @@ describe("ReceivablesDashboard", () => {
     renderDashboard({ bucket: "days31to60", client: "bw" }, "bucket=31-60&client=bw", [])
     const empty = screen.getByTestId("no-receivable-invoices")
     expect(empty).toHaveTextContent("No unpaid invoices match these filters.")
-    expect(within(empty).getByRole("link", { name: "Clear" })).toHaveAttribute("href", "/finance/receivables")
+    expect(within(empty).getByRole("link", { name: "Clear" })).toHaveAttribute("href", "/finance/receivables?client=bw")
     expect(screen.queryByTestId("receivables-table")).toBeNull()
   })
 })

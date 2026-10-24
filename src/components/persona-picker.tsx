@@ -94,12 +94,7 @@ export function PickerFrame({ children }: { children: ReactNode }) {
           <NorthwindLogo />
           <span className="text-base font-semibold tracking-tight">Northwind</span>
         </div>
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Choose who you&apos;re signing in as</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            This is a demo session: pick a person to open their portal. There is no password.
-          </p>
-        </div>
+        <h1 className="text-2xl font-semibold tracking-tight">Choose who you&apos;re signing in as</h1>
       </header>
       {children}
     </main>

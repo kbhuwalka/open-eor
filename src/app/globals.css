@@ -52,6 +52,7 @@
   --color-signing: var(--signing);
   --color-signing-foreground: var(--signing-foreground);
   --color-chart-brand: var(--chart-brand);
+  --color-chart-brand-soft: var(--chart-brand-soft);
   --color-chart-positive: var(--chart-positive);
   --color-chart-neutral: var(--chart-neutral);
   --color-chart-caution: var(--chart-caution);
@@ -170,9 +171,10 @@
 .dark,
 [data-theme] {
   --chart-brand: var(--primary);
+  --chart-brand-soft: color-mix(in oklab, var(--primary) 28%, var(--card));
   --chart-positive: var(--status-success-foreground);
   --chart-neutral: color-mix(in oklch, var(--muted-foreground) 45%, var(--card));
-  --chart-caution: var(--status-warning-foreground);
+  --chart-caution: color-mix(in oklab, var(--status-danger-foreground) 42%, var(--card));
   --chart-alert: var(--status-danger-foreground);
   --chart-critical: color-mix(in oklch, var(--status-danger-foreground) 70%, var(--foreground));
   --chart-pending: var(--muted);

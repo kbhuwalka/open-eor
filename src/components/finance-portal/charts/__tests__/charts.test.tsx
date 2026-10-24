@@ -32,14 +32,14 @@ describe("BilledVsCollectedChart", () => {
   it("titles the chart with its takeaway and lists every period's exact figures in the table", () => {
     render(<BilledVsCollectedChart periods={periods} />)
     const figure = screen.getByRole("figure", { name: "Billed vs collected" })
-    expect(figure).toHaveTextContent("$190K collected of $220K billed (86%) · $10K in flight")
+    expect(figure).toHaveTextContent("86% collected of $220K billed")
     const table = screen.getByRole("table", { name: "Billed vs collected by pay period" })
-    expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual(["Pay period", "Billed", "Collected", "In flight", "Gap"])
+    expect(within(table).getAllByRole("columnheader").map((th) => th.textContent)).toEqual(["Pay period", "Billed", "Collected", "In flight", "Not yet collected"])
     const [, second] = bodyRows(table)
     expect(within(second).getAllByRole("cell").map((td) => td.textContent)).toEqual(["$120,000.00", "$90,000.00", "$10,000.00", "$30,000.00"])
-    expect(legendLabels(figure)).toEqual(["Billed", "Collected"])
+    expect(legendLabels(figure)).toEqual(["Collected", "Not yet collected"])
     expect(within(figure).getByRole("application")).toHaveAccessibleName(
-      "Billed vs collected. $190K collected of $220K billed (86%) · $10K in flight. Use the arrow keys to read each pay period.",
+      "Billed vs collected. 86% collected of $220K billed. Use the arrow keys to read each pay period.",
     )
   })
 

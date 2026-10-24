@@ -6,7 +6,7 @@ import { openLiveDb } from "./support/live"
  * The Onboarding specialist home's filters (task-inbox.md §7, ui-guidelines C43): Client, Task and
  * Status filters that narrow, combine and clear, and a search, over grouped rows opening a drawer
  * (e2e/task-inbox.spec.ts), whose collapsed groups `showAll` opens here. Finance has no task list:
- * its Home is the action tiles and "Waiting on you" (e2e/finance-home.spec.ts); the Payments
+ * its Home is the figures line, the chart and To do (e2e/finance-home.spec.ts); the Payments
  * covered-invoices checks below sign in as Finance.
  * Read-only, so it runs on any seeded database:
  *

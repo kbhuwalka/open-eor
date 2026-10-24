@@ -1,10 +1,10 @@
 /**
- * Read models of the Finance role's portal (docs/finance-portal.md): the Home's three tiles, the
+ * Read models of the Finance role's portal (docs/finance-portal.md): the Home's three figures, the
  * company filter, the payment counts and the PDF input of any invoice. Invoices, payments and
  * receivables themselves come from `billing-queries.ts`. Every function takes the session user and
  * refuses anyone but Finance; nothing here writes.
  */
-import { asc, eq, sql } from "drizzle-orm"
+import { and, asc, eq, sql } from "drizzle-orm"
 
 import type { SessionUser } from "@/auth"
 import type { AppDatabase } from "@/db/client"
@@ -23,7 +23,7 @@ function assertFinance(actor: Pick<SessionUser, "role">): void {
   if (actor.role !== "finance") throw new DomainError("FORBIDDEN_ROLE", { actorRole: actor.role })
 }
 
-// ── Home tiles ──────────────────────────────────────────────────────
+// ── Home figures ──────────────────────────────────────────────────────
 
 export type FinanceOverview = {
   /** The business day (America/New_York) the figures are for. */
@@ -40,10 +40,10 @@ export type OverviewInput = {
   today: string
   initiated: { count: number; cents: number; oldestInitiatedAt: string | null }
   book: Pick<AgeingTotals, "overdueCents" | "overdueCount" | "oldestOverdueDays">
-  preview: Pick<BillingPreview, "wouldIssue" | "upcoming">
+  preview: { wouldIssue: Pick<BillingPreview["wouldIssue"], "count" | "totalCents">; upcoming: readonly { issueDate: string }[] }
 }
 
-/** The Home tiles from what the pages behind them read: To settle, the book's ageing and the billing preview. */
+/** The Home figures from what the pages behind them read: To settle, the book's ageing and the billing preview. */
 export function overviewFrom({ today, initiated, book, preview }: OverviewInput): FinanceOverview {
   return {
     today,
@@ -58,33 +58,42 @@ export function overviewFrom({ today, initiated, book, preview }: OverviewInput)
 }
 
 /**
- * Finance: the three Home tiles. A page that already holds the book's ageing or the billing preview
- * passes them, so neither the receivables nor the billing run is planned twice in one request.
+ * Finance: the Home's three figures. A page that already holds the book's ageing or the billing
+ * preview passes them, so neither the receivables nor the billing run is planned twice in one
+ * request. With `companyId` the figures are that client's: To settle and Ready to bill are narrowed
+ * here, and `book` must then be the client's totals (`ageingTotalsFor`).
  */
 export function financeOverview(
   db: Reader,
   actor: SessionUser,
   now: Date = new Date(),
-  given: { book?: AgeingTotals; preview?: BillingPreview } = {},
+  given: { book?: AgeingTotals; preview?: BillingPreview; companyId?: string | null } = {},
 ): FinanceOverview {
   assertFinance(actor)
+  const companyId = given.companyId ?? null
+  const initiated = and(eq(payments.status, "initiated"), companyId ? eq(payments.companyId, companyId) : undefined)
   const totals = db
     .select({ count: sql<number>`count(*)`, cents: sql<number>`coalesce(sum(${payments.totalCents}), 0)` })
     .from(payments)
-    .where(eq(payments.status, "initiated"))
+    .where(initiated)
     .get()
   const oldest = db
     .select({ initiatedAt: payments.initiatedAt })
     .from(payments)
-    .where(eq(payments.status, "initiated"))
+    .where(initiated)
     .orderBy(asc(payments.initiatedAt), asc(payments.id))
     .limit(1)
     .get()
+  const preview = given.preview ?? previewBillingRun(db, actor, now)
+  const ready = companyId ? preview.wouldIssue.byCompany.find((company) => company.companyId === companyId) : null
   return overviewFrom({
     today: businessDayOf(now),
     initiated: { count: totals?.count ?? 0, cents: totals?.cents ?? 0, oldestInitiatedAt: oldest ? oldest.initiatedAt.toISOString() : null },
     book: given.book ?? clientAgeing(db, actor, now).bookAgeing,
-    preview: given.preview ?? previewBillingRun(db, actor, now),
+    preview: {
+      wouldIssue: companyId ? { count: ready?.count ?? 0, totalCents: ready?.totalCents ?? 0 } : preview.wouldIssue,
+      upcoming: preview.upcoming,
+    },
   })
 }
 

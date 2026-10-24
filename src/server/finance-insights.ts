@@ -1,6 +1,6 @@
 /**
  * Finance insight read models (docs/finance-portal.md §4.1): the figures behind the Finance charts
- * and the "Waiting on you" list. Billed against collected per pay period, the oldest payments to
+ * and the Finance Home's To do list. Billed against collected per pay period, the oldest payments to
  * settle, the ageing of every client and of the whole book, and the billing cadence (the last
  * issued pay periods and the next estimated ones). Finance only; nothing here writes.
  *
@@ -162,13 +162,15 @@ export function summarizeBilledVsCollected(input: {
 /**
  * Finance: per pay period (the invoice's service period, from the pay calendar) what was invoiced
  * and what has been collected, for the last `periods` periods billed as of `now`. Reads payments
- * as they are stored now: `now` picks the window, it does not replay history.
+ * as they are stored now: `now` picks the window, it does not replay history. `companyId` narrows
+ * it to one client's invoices.
  */
 export function billedVsCollectedByPeriod(
   db: Reader,
   actor: Pick<SessionUser, "role">,
   now: Date = new Date(),
   periods: number = DEFAULT_BILLED_PERIODS,
+  companyId: string | null = null,
 ): BilledVsCollected {
   assertFinance(actor)
   const asOf = businessDayOf(now)
@@ -188,9 +190,12 @@ export function billedVsCollectedByPeriod(
           })
           .from(invoices)
           .where(
-            or(
-              and(eq(invoices.kind, "payroll"), inArray(invoices.periodIndex, window.map((period) => period.index))),
-              and(eq(invoices.kind, "deposit"), gt(invoices.issueDate, depositsAfter), lte(invoices.issueDate, asOf)),
+            and(
+              or(
+                and(eq(invoices.kind, "payroll"), inArray(invoices.periodIndex, window.map((period) => period.index))),
+                and(eq(invoices.kind, "deposit"), gt(invoices.issueDate, depositsAfter), lte(invoices.issueDate, asOf)),
+              ),
+              companyId ? eq(invoices.companyId, companyId) : undefined,
             ),
           )
           .all()
@@ -288,19 +293,22 @@ export function waitingPaymentFrom(
 /**
  * Finance: the first `limit` initiated payments in the order the To settle tab lists them (a
  * deposit first, since an order waits on it, then the longest-waiting first), and how many wait in all.
+ * `companyId` narrows both to one client's payments.
  */
 export function oldestWaitingPayments(
   db: Reader,
   actor: Pick<SessionUser, "role">,
   now: Date = new Date(),
   limit: number = DEFAULT_WAITING_LIMIT,
+  companyId: string | null = null,
 ): OldestWaitingPayments {
   assertFinance(actor)
   const today = businessDayOf(now)
+  const waiting = and(eq(payments.status, "initiated"), companyId ? eq(payments.companyId, companyId) : undefined)
   const total = db
     .select({ count: sql<number>`count(*)`, cents: sql<number>`coalesce(sum(${payments.totalCents}), 0)` })
     .from(payments)
-    .where(eq(payments.status, "initiated"))
+    .where(waiting)
     .get()
   const rows = db
     .select({
@@ -312,7 +320,7 @@ export function oldestWaitingPayments(
     })
     .from(payments)
     .innerJoin(clientCompanies, eq(clientCompanies.id, payments.companyId))
-    .where(eq(payments.status, "initiated"))
+    .where(waiting)
     .orderBy(desc(coversDeposit), asc(payments.initiatedAt), asc(payments.id))
     .limit(Math.max(0, Math.trunc(limit)))
     .all()
@@ -418,6 +426,19 @@ export function ageingFromReceivables(report: Receivables): ClientAgeing {
     null,
   )
   return { asOf: report.asOf, clients, bookAgeing: ageingTotals(report, oldestDueDate, report.asOf) }
+}
+
+/**
+ * The totals of one client (all zeros for a client with nothing outstanding or in flight, which
+ * `clients` leaves out), or of the whole book when `companyId` is `null`.
+ */
+export function ageingTotalsFor(ageing: ClientAgeing, companyId: string | null): AgeingTotals {
+  if (companyId === null) return ageing.bookAgeing
+  const row = ageing.clients.find((client) => client.companyId === companyId)
+  if (row) return row
+  const none = { count: 0, cents: 0 }
+  const buckets = Object.fromEntries(AGEING_BUCKETS.map((bucket) => [bucket, none])) as Record<AgeingBucket, BucketTotal>
+  return ageingTotals({ buckets, inFlight: none, totalCents: 0, invoiceCount: 0 }, null, ageing.asOf)
 }
 
 /** Finance: what every client owes by ageing bucket, ranked by overdue, and the book's totals. */

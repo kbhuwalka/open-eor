@@ -1,25 +1,7 @@
 import Link from "next/link"
-import { cn } from "cn"
 
-import { formatWholeDollars } from "@/lib/finance-portal-view"
-import { formatCents } from "@/lib/format"
+import { FigureAmount as Amount, FigureDot as Dot } from "@/components/finance-portal/figure-amount"
 import { IN_FLIGHT_HREF, type ReceivablesFigures as Figures } from "@/lib/receivables-view"
-
-/** Whole dollars on screen; the exact amount in the `title` and for screen readers. */
-function Amount({ cents, className, testId }: { cents: number; className?: string; testId: string }) {
-  return (
-    <span className={cn("font-semibold tabular-nums", className)} title={formatCents(cents)} data-testid={testId} data-cents={cents}>
-      <span aria-hidden>{formatWholeDollars(cents)}</span>
-      <span className="sr-only">{formatCents(cents)}</span>
-    </span>
-  )
-}
-
-const Dot = () => (
-  <span aria-hidden className="text-muted-foreground">
-    ·
-  </span>
-)
 
 /**
  * The one quiet line over the charts: what the filtered book owes, its overdue part (danger) and,

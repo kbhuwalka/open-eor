@@ -9,7 +9,7 @@ import { BilledVsCollectedChart } from "@/components/finance-portal/charts/bille
 import { UpcomingBillingChart } from "@/components/finance-portal/charts/upcoming-billing-chart"
 import { AGEING_SEGMENT_LABELS, type AgeingSegmentKey } from "@/lib/finance-chart-view"
 import { formatCents } from "@/lib/format"
-import { bucketRows, clientRows, parseReceivablesQuery, type ReceivablesQuery } from "@/lib/receivables-view"
+import { ageTakeaway, bucketRows, parseReceivablesQuery, type ReceivablesQuery } from "@/lib/receivables-view"
 import type { ClientAgeing } from "@/server/finance-insights"
 
 import {
@@ -47,12 +47,6 @@ function Card({ label, className, children }: { label: string; className?: strin
 }
 
 const BOOK: ClientAgeing = { asOf: "2026-10-24", clients: CLIENT_AGEING, bookAgeing: BOOK_AGEING }
-const MANY_CLIENTS: ClientAgeing = {
-  ...BOOK,
-  clients: Array.from({ length: 4 }, (_, copy) =>
-    CLIENT_AGEING.map((row) => ({ ...row, companyId: `${row.companyId}-${copy}`, companyName: copy ? `${row.companyName} ${copy + 1}` : row.companyName })),
-  ).flat(),
-}
 const NONE: Pick<ReceivablesQuery, "bucket" | "client"> = { bucket: null, client: null }
 
 const hasBucket = (key: AgeingSegmentKey, row: (typeof CLIENT_AGEING)[number]) =>
@@ -129,13 +123,24 @@ export function ChartsShowcase() {
         </div>
       </Section>
 
-      <Section title="BarList" description="Receivables' By age and By client (CH10): rows that toggle a filter, the two crossfiltering each other; a $0 row is disabled; past six clients the rest fold.">
+      <Section title="BarList" description="Receivables' By age (CH10): rows that toggle a filter; a $0 row is disabled. Card and section variants.">
         <div className="grid gap-6 lg:grid-cols-2">
           <BarList title="By age" rows={bucketRows(BOOK, filters, current)} rowHeader="Days late" emptyMessage="Nothing is owed." onNavigate={follow} />
-          <BarList title="By client" rows={clientRows(BOOK, filters, current)} rowHeader="Client" emptyMessage="No client owes money of this age." onNavigate={follow} />
           <div className="flex flex-col gap-2">
-            <span className="font-mono text-xs text-muted-foreground">narrow (w-80), folded</span>
-            <BarList title="By client" rows={clientRows(MANY_CLIENTS, NONE)} rowHeader="Client" emptyMessage="None." className="w-80" />
+            <span className="font-mono text-xs text-muted-foreground">section (as on Receivables)</span>
+            <BarList
+              title="By age"
+              variant="section"
+              takeaway={ageTakeaway(bucketRows(BOOK, filters, current))}
+              rows={bucketRows(BOOK, filters, current)}
+              rowHeader="Days late"
+              emptyMessage="Nothing is owed."
+              onNavigate={follow}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <span className="font-mono text-xs text-muted-foreground">narrow (w-80)</span>
+            <BarList title="By age" rows={bucketRows(BOOK, NONE)} rowHeader="Days late" emptyMessage="Nothing is owed." className="w-80" />
           </div>
           <div className="flex flex-col gap-2">
             <span className="font-mono text-xs text-muted-foreground">empty</span>

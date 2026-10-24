@@ -49,14 +49,12 @@ export type BilledCollectedPoint = {
   inFlightCents?: number
 }
 
-/** "$896K collected of $1.1M billed (79%) · $38.5K in flight"; "Nothing billed yet." when empty. */
+/** "79% collected of $1.1M billed"; "Nothing billed yet." when empty. */
 export function collectionTakeaway(periods: readonly BilledCollectedPoint[]): string {
   const billed = periods.reduce((total, period) => total + period.billedCents, 0)
   const collected = periods.reduce((total, period) => total + period.collectedCents, 0)
-  const inFlight = periods.reduce((total, period) => total + (period.inFlightCents ?? 0), 0)
   if (billed === 0) return "Nothing billed yet."
-  const line = `${formatCompactCents(collected)} collected of ${formatCompactCents(billed)} billed (${percentOf(collected, billed)}%)`
-  return inFlight > 0 ? `${line} · ${formatCompactCents(inFlight)} in flight` : line
+  return `${percentOf(collected, billed)}% collected of ${formatCompactCents(billed)} billed`
 }
 
 export function hasBilling(periods: readonly BilledCollectedPoint[]): boolean {
@@ -157,12 +155,10 @@ export type BarListRow = {
   /** Length of the bar against the longest row (0 to 1). */
   scale: number
   selected: boolean
-  /** The link that toggles this row as a filter; `null` for a row that filters nothing (empty, or folded). */
+  /** The link that toggles this row as a filter; `null` for a row that filters nothing (an empty one). */
   href: string | null
   /** The row's accessible name, stating its figures. */
   name: string
-  /** The "N others" row, which stands for several. */
-  folded?: boolean
 }
 
 // ── Billing cadence ─────────────────────────────────────────────────

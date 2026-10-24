@@ -15,6 +15,7 @@ import { previewBillingRun } from "../billing-preview"
 import { AGEING_BUCKETS, listFinanceInvoices, listFinancePayments, receivables, type Receivables } from "../billing-queries"
 import {
   ageingFromReceivables,
+  ageingTotalsFor,
   billedPeriodWindow,
   billedVsCollectedByPeriod,
   billingCadence,
@@ -29,7 +30,7 @@ import {
   type InvoiceAllocation,
 } from "../finance-insights"
 import { financePaymentsPage } from "../finance-lists"
-import { paymentStatusCounts } from "../finance-portal-queries"
+import { listCompanyOptions, paymentStatusCounts } from "../finance-portal-queries"
 
 import { makeClock, makeDeps, sessionUser, tempDbFactory } from "./helpers"
 
@@ -349,6 +350,37 @@ describe("on the seeded book", () => {
     }
     expect(result.totals.billedCents).toBeGreaterThan(result.totals.collectedCents)
     expect(result.deposits.invoiceCount).toBeGreaterThan(0)
+  })
+
+  it("narrowed to one client, billed vs collected is that client's and the clients add up to the book", () => {
+    const companies = listCompanyOptions(db, finance())
+    const book = billedVsCollectedByPeriod(db, finance(), SEED_NOW)
+    const each = companies.map((company) => billedVsCollectedByPeriod(db, finance(), SEED_NOW, DEFAULT_BILLED_PERIODS, company.id))
+    const total = (pick: (flow: (typeof book)["totals"]) => number) => each.reduce((n, result) => n + pick(result.totals), 0)
+    expect(total((t) => t.billedCents)).toBe(book.totals.billedCents)
+    expect(total((t) => t.collectedCents)).toBe(book.totals.collectedCents)
+    expect(total((t) => t.inFlightCents)).toBe(book.totals.inFlightCents)
+    expect(each.some((result) => result.totals.billedCents < book.totals.billedCents && result.totals.billedCents > 0)).toBe(true)
+    expect(billedVsCollectedByPeriod(db, finance(), SEED_NOW, DEFAULT_BILLED_PERIODS, "no_such_company").totals.billedCents).toBe(0)
+  })
+
+  it("narrowed to one client, the waiting payments and their total are that client's, and the clients add up to the book", () => {
+    const companies = listCompanyOptions(db, finance())
+    const book = oldestWaitingPayments(db, finance(), SEED_NOW, 50)
+    const each = companies.map((company) => ({ company, waiting: oldestWaitingPayments(db, finance(), SEED_NOW, 50, company.id) }))
+    expect(each.reduce((n, { waiting }) => n + waiting.total.count, 0)).toBe(book.total.count)
+    expect(each.reduce((n, { waiting }) => n + waiting.total.cents, 0)).toBe(book.total.cents)
+    for (const { company, waiting } of each) {
+      expect(waiting.payments.every((payment) => payment.companyId === company.id)).toBe(true)
+      expect(waiting.payments.map((payment) => payment.paymentId)).toEqual(book.payments.filter((payment) => payment.companyId === company.id).map((payment) => payment.paymentId))
+    }
+  })
+
+  it("ageingTotalsFor is the book, a client's row, or zeros for a client that owes nothing", () => {
+    const ageing = clientAgeing(db, finance(), SEED_NOW)
+    expect(ageingTotalsFor(ageing, null)).toBe(ageing.bookAgeing)
+    expect(ageingTotalsFor(ageing, ageing.clients[0].companyId)).toBe(ageing.clients[0])
+    expect(ageingTotalsFor(ageing, "no_such_company")).toMatchObject({ outstandingCents: 0, overdueCents: 0, overdueCount: 0, oldestOverdueDays: null })
   })
 
   it("asks for as many periods as requested", () => {

@@ -5,7 +5,7 @@ import Link from "next/link"
 import { cn } from "cn"
 import { Check } from "lucide-react"
 
-import { CHART_FILL, ChartDataTable, ChartEmptyState } from "@/components/ui/chart"
+import { CHART_FILL, ChartDataTable, ChartEmptyState, ChartFrame } from "@/components/ui/chart"
 import type { BarListRow } from "@/lib/finance-chart-view"
 import { formatCents } from "@/lib/format"
 import { formatWholeDollars, plural } from "@/lib/finance-portal-view"
@@ -58,7 +58,7 @@ function RowContent({ row }: { row: BarListRow }) {
     <>
       <span className="flex min-w-0 items-baseline gap-3">
         <span
-          className={cn("flex min-w-0 flex-1 items-center gap-1.5 truncate", row.selected && "font-medium", row.folded && "text-muted-foreground")}
+          className={cn("flex min-w-0 flex-1 items-center gap-1.5 truncate", row.selected && "font-medium")}
           data-testid="bar-list-label"
         >
           {row.selected ? <Check aria-hidden className="size-3.5 shrink-0" data-testid="bar-list-check" /> : null}
@@ -121,6 +121,13 @@ export type BarListProps = {
   className?: string
   /** Under the rows, before the hidden table (a legend). */
   footer?: ReactNode
+  /**
+   * `card`: a bordered card with a small muted title. `section`: no box, the title as a
+   * `text-base font-semibold` section heading with `takeaway` muted beside it and a hairline under
+   * it (the Finance Home's chart head).
+   */
+  variant?: "card" | "section"
+  takeaway?: ReactNode
 }
 
 /**
@@ -128,29 +135,19 @@ export type BarListProps = {
  * count, the amount written on the row and a bar scaled to the longest row, in status tones only.
  * A row that filters is a link with `role="button"` and `aria-pressed` (Enter and Space); the
  * selected one is outlined with a check and a bolder label, and the others keep full contrast. A
- * row with nothing in it, and the folded "N others" row, filter nothing and are not links.
+ * row with nothing in it filters nothing and is not a link.
  */
-export function BarList({ title, rows, rowHeader, emptyMessage, onNavigate, testId, className, footer }: BarListProps) {
+export function BarList({ title, rows, rowHeader, emptyMessage, onNavigate, testId, className, footer, variant = "card", takeaway }: BarListProps) {
   const titleId = useId()
   const drawn = rows.some((row) => row.cents > 0)
-  return (
-    <section aria-labelledby={titleId} className={cn("flex min-w-0 flex-col gap-3 rounded-lg border border-border p-4", className)} data-testid={testId}>
-      <h3 id={titleId} className="px-2.5 text-xs font-medium text-muted-foreground">
-        {title}
-      </h3>
+  const body = (
+    <>
       {drawn ? (
-        <ul className="flex flex-col gap-0.5">
+        <ul className={cn("flex flex-col gap-0.5", variant === "section" && "-mx-2.5")}>
           {rows.map((row) => (
             <li key={row.key}>
               {row.href !== null ? (
                 <FilterRow row={{ ...row, href: row.href }} onNavigate={onNavigate} />
-              ) : row.folded ? (
-                <div className={ROW} data-testid="bar-list-row" data-key={row.key} data-cents={row.cents} data-folded>
-                  <span className="sr-only">{row.name}</span>
-                  <span aria-hidden className="contents">
-                    <RowContent row={row} />
-                  </span>
-                </div>
               ) : (
                 <button
                   type="button"
@@ -177,6 +174,23 @@ export function BarList({ title, rows, rowHeader, emptyMessage, onNavigate, test
         columns={[rowHeader, "Amount", "Invoices"]}
         rows={rows.map((row) => ({ key: row.key, cells: [row.label, formatCents(row.cents), String(row.count)] }))}
       />
+    </>
+  )
+  if (variant === "section") {
+    return (
+      <div className={cn("min-w-0", className)} data-testid={testId}>
+        <ChartFrame title={title} takeaway={takeaway} variant="section">
+          {body}
+        </ChartFrame>
+      </div>
+    )
+  }
+  return (
+    <section aria-labelledby={titleId} className={cn("flex min-w-0 flex-col gap-3 rounded-lg border border-border p-4", className)} data-testid={testId}>
+      <h3 id={titleId} className="px-2.5 text-xs font-medium text-muted-foreground">
+        {title}
+      </h3>
+      {body}
     </section>
   )
 }
