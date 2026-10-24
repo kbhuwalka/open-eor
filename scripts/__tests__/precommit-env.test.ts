@@ -51,23 +51,33 @@ describe("shouldSkipHookRun", () => {
 describe("buildPrecommitEnv", () => {
   const cwd = path.join(os.tmpdir(), "fake-repo-root")
 
-  it("sets CI=true and points DB/uploads outside the project without E2E_DATABASE_FILE", () => {
+  it("sets CI=true, per-spec DB, and a shared out-of-tree uploads root", () => {
     const workDir = path.join(os.tmpdir(), "precommit-work")
-    const env = buildPrecommitEnv({ cwd, workDir, port: 3720 })
+    const uploadsRoot = path.join(os.tmpdir(), "precommit-template-uploads")
+    const env = buildPrecommitEnv({ cwd, workDir, uploadsRoot, port: 3720 })
 
     expect(env.CI).toBe("true")
     expect(env.PORT).toBe("3720")
     expect(env.DATABASE_FILE).toBe(path.join(workDir, "eor.sqlite"))
-    expect(env.UPLOADS_ROOT).toBe(path.join(workDir, "uploads"))
+    expect(env.UPLOADS_ROOT).toBe(uploadsRoot)
     expect(env).not.toHaveProperty("E2E_DATABASE_FILE")
     expect(path.relative(cwd, env.DATABASE_FILE).startsWith("..")).toBe(true)
   })
 
-  it("refuses a workDir inside the project", () => {
+  it("refuses a workDir or uploadsRoot inside the project", () => {
+    const outside = path.join(os.tmpdir(), "precommit-uploads")
     expect(() =>
       buildPrecommitEnv({
         cwd,
         workDir: path.join(cwd, "data", "precommit"),
+        uploadsRoot: outside,
+      }),
+    ).toThrow(/outside the project/)
+    expect(() =>
+      buildPrecommitEnv({
+        cwd,
+        workDir: outside,
+        uploadsRoot: path.join(cwd, "data", "uploads"),
       }),
     ).toThrow(/outside the project/)
   })

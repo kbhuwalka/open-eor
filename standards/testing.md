@@ -212,8 +212,9 @@ pnpm lint && pnpm test:precommit && pnpm build
 ```
 
 `pnpm test:precommit` (`scripts/test-precommit.ts`) owns unit then e2e: binaries
-from `node_modules/.bin`, `CI=true`, and a temp `DATABASE_FILE` / `UPLOADS_ROOT`
-outside the repo (cleaned up on exit). Husky pre-push runs the same script.
+from `node_modules/.bin`, `CI=true`, a seeded template outside the repo, then
+per-spec sqlite copies (shared template `UPLOADS_ROOT`). Husky pre-push runs the
+same script.
 CI Quality Gates remain Lint + Production Build. If verification or the hook is
 skipped via husky (`SKIP=pre-push|pre-commit|tests|all` with `--hook`, `HUSKY=0`,
 or `git push --no-verify`), explain why in the PR. `pnpm test:precommit` always

@@ -5,9 +5,10 @@
  * - husky calls this with `--hook`; only then may SKIP short-circuit.
  *
  * Vitest uses the parent environment (`pnpm test` parity). Playwright: seed one
- * template DB outside the repo, then for each spec from `playwright test --list`
- * copy that template (and uploads) into a fresh work dir with its own PORT and
- * run `playwright test <file>` so writers cannot consume each other's seed rows.
+ * template DB + uploads outside the repo, then for each spec from
+ * `playwright test --list` copy only `eor.sqlite` into a fresh work dir (own
+ * PORT) while sharing the template `UPLOADS_ROOT` so cwd-relative `storage_path`
+ * rows still resolve. Writers cannot consume each other's seed rows.
  */
 import { spawnSync } from "node:child_process"
 import fs from "node:fs"
@@ -33,6 +34,7 @@ function main(argv: string[]): number {
 
   const rootWork = defaultPrecommitWorkDir()
   const templateDir = path.join(rootWork, "template")
+  const templateUploads = path.join(templateDir, "uploads")
   const cleanup = () => {
     try {
       fs.rmSync(rootWork, { recursive: true, force: true })
@@ -45,23 +47,22 @@ function main(argv: string[]): number {
     const vitest = run(bin("vitest"), ["run"], { ...process.env })
     if (vitest !== 0) return vitest
 
-    seedTemplate(templateDir)
+    seedTemplate(templateDir, templateUploads)
     const specs = listSpecFiles()
     if (specs.length === 0) {
       console.error("test-precommit: playwright --list returned no spec files")
       return 1
     }
-    console.log(`test-precommit: ${specs.length} spec files (per-file DB copy from template)`)
+    console.log(
+      `test-precommit: ${specs.length} spec files (per-file sqlite copy; shared UPLOADS_ROOT)`,
+    )
 
     let port = 3720
     for (const spec of specs) {
       const workDir = path.join(rootWork, path.basename(spec, ".spec.ts"))
       fs.mkdirSync(workDir, { recursive: true })
       fs.copyFileSync(path.join(templateDir, "eor.sqlite"), path.join(workDir, "eor.sqlite"))
-      fs.cpSync(path.join(templateDir, "uploads"), path.join(workDir, "uploads"), {
-        recursive: true,
-      })
-      const env = playwrightEnv(workDir, port)
+      const env = playwrightEnv(workDir, templateUploads, port)
       port += 1
       console.log(`test-precommit: ${spec} DATABASE_FILE=${env.DATABASE_FILE} PORT=${env.PORT}`)
       const code = run(bin("playwright"), ["test", spec], env)
@@ -73,8 +74,7 @@ function main(argv: string[]): number {
   }
 }
 
-function seedTemplate(templateDir: string): void {
-  const uploads = path.join(templateDir, "uploads")
+function seedTemplate(templateDir: string, uploads: string): void {
   const dbFile = path.join(templateDir, "eor.sqlite")
   fs.mkdirSync(uploads, { recursive: true })
   const previousUploads = process.env.UPLOADS_ROOT
@@ -102,8 +102,12 @@ function listSpecFiles(): string[] {
   return specFilesFromPlaywrightList(result.stdout ?? "")
 }
 
-function playwrightEnv(workDir: string, port: number): NodeJS.ProcessEnv {
-  const built = buildPrecommitEnv({ cwd: root, workDir, port })
+function playwrightEnv(
+  workDir: string,
+  uploadsRoot: string,
+  port: number,
+): NodeJS.ProcessEnv {
+  const built = buildPrecommitEnv({ cwd: root, workDir, uploadsRoot, port })
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...built,

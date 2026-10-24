@@ -30,8 +30,13 @@ export function shouldSkipHookRun(
 
 export type PrecommitEnvInput = {
   cwd: string
-  /** Absolute path to a directory outside `cwd` (typically under os.tmpdir()). */
+  /** Absolute path to a directory outside `cwd` holding the per-spec `eor.sqlite`. */
   workDir: string
+  /**
+   * Uploads tree the seed wrote (shared across specs). Must stay the seed's
+   * directory: `storage_path` is cwd-relative to those files.
+   */
+  uploadsRoot: string
   port?: number
 }
 
@@ -58,8 +63,13 @@ export function buildPrecommitEnv(input: PrecommitEnvInput): PrecommitEnv {
       `precommit workDir must be outside the project: got ${workDir} under ${cwd}`,
     )
   }
+  const uploadsRoot = path.resolve(input.uploadsRoot)
+  if (isPathInside(uploadsRoot, cwd)) {
+    throw new Error(
+      `precommit uploadsRoot must be outside the project: got ${uploadsRoot} under ${cwd}`,
+    )
+  }
   const databaseFile = path.join(workDir, "eor.sqlite")
-  const uploadsRoot = path.join(workDir, "uploads")
   return {
     CI: "true",
     DATABASE_FILE: databaseFile,

@@ -10,10 +10,9 @@ const nextBin = path.join(process.cwd(), "node_modules", ".bin", "next")
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: !process.env.CI,
-  // One shared temp DB under CI/pre-push: serialize so writers do not race seed rows.
+  // test-precommit runs one file at a time; keep in-file order under CI.
   workers: process.env.CI ? 1 : undefined,
   forbidOnly: !!process.env.CI,
-  // Shared sqlite: do not replay a failed writer against the same file.
   retries: 0,
   reporter: "list",
   use: {

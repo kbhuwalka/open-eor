@@ -47,7 +47,7 @@ Seeded personas: Client HR (Alex Harper), Worker (Jordan Lee, owns `case_pending
 
 ## Pre-push hooks
 
-After `pnpm install`, husky installs a **pre-push** hook that runs `scripts/test-precommit.ts` (same as `pnpm test:precommit`): Vitest, then Playwright. Playwright seeds one out-of-repo template DB, then runs each spec file from `playwright test --list` against its own copied DB/uploads and PORT (writers cannot steal each other’s seed rows). Runs on `git push` (not every commit). Expect several minutes for unit plus longer for full e2e (one Next boot per spec file). Quality Gates on GitHub Actions only run **Lint** and **Production Build**. Policy: `scripts/precommit-env.ts`.
+After `pnpm install`, husky installs a **pre-push** hook that runs `scripts/test-precommit.ts` (same as `pnpm test:precommit`): Vitest, then Playwright. Playwright seeds one out-of-repo template, then runs each spec from `playwright test --list` against a **copied sqlite** and its own PORT, while sharing the template `UPLOADS_ROOT` (seeded `storage_path` rows stay readable). Runs on `git push` (not every commit). Expect several minutes for unit plus longer for full e2e (one Next boot per spec file). Quality Gates on GitHub Actions only run **Lint** and **Production Build**. Policy: `scripts/precommit-env.ts`.
 
 Enable / refresh hooks:
 
