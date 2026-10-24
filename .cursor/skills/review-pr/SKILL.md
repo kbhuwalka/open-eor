@@ -5,7 +5,7 @@ description: Manual one-off PR review. Post a binary verdict as a PR comment via
 
 # Review PR
 
-**Manual one-off only.** The factory happy path uses the Cursor PR review Automation (`cursor[bot]` formal approve / request-changes). Use this skill when explicitly asked to review without the Automation.
+**Manual one-off only.** The factory happy path uses the Cursor PR review Automation (GitHub login often `cursor`; formal approve / request-changes). Use this skill when explicitly asked to review without the Automation.
 
 Review the PR/branch you’re given. No branch setup.
 

@@ -178,6 +178,12 @@ require_approving_review() {
   local state author
   state=$(printf '%s\n' "$out" | cut -f1)
   author=$(printf '%s\n' "$out" | cut -f2)
+  # Exit 2 from the gate module = broken invocation (bad JSON, missing --head), not "no approve".
+  if [[ $status -eq 2 ]]; then
+    echo "✗ PR #${PR} — approving-review gate failed (module/CLI error)" >&2
+    echo "  ${out}" >&2
+    exit 1
+  fi
   if [[ $status -ne 0 || "$state" != "APPROVED" ]]; then
     echo "✗ PR #${PR} — no approving GitHub review on head ${head_sha:0:7}" >&2
     echo "  Latest decisive review on this head: ${state}${author:+ (from ${author})}" >&2
@@ -209,10 +215,11 @@ do_merge() {
 
   echo "PR #${PR} — merging..."
   local output
-  if ! output=$(gh pr merge "$PR" --squash 2>&1); then
+  if ! output=$(gh pr merge "$PR" --squash --match-head-commit "$HEAD_SHA" 2>&1); then
     echo "✗ PR #${PR} — merge failed" >&2
     echo "  ${output}" >&2
     echo "  Required: an approving GitHub review on the head SHA and green Quality Gates." >&2
+    echo "  Merge uses --match-head-commit ${HEAD_SHA:0:7} so a raced push cannot slip through." >&2
     exit 1
   fi
   echo "✓ PR #${PR} — merged"

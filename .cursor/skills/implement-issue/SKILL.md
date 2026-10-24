@@ -16,7 +16,7 @@ Cursor already checked out a working branch from `main` — stay on it. PR base 
 3. **Implement** + `pnpm lint && pnpm test && pnpm build` (e2e optional; CI is merge gate)
 4. **Push + open PR** to `main` with `Closes #<n>`; fill the PR template
 5. **After each push that awaits review/CI:** subscribe (below), then **end the turn**. Do **not** spawn a `review-pr` worker. Do **not** busy-wait / sleep-poll. The EM does not review and does not merge.
-6. **On every wake** (PR notification, CI notification, or stuck timer): re-read the PR, then apply the **Wake decision table** once. Do not invent a second procedure.
+6. **On every wake** (PR notification, CI notification, or stuck timer): re-read the PR, then apply the **Wake decision table** once (first match wins). Do not invent a second procedure.
 
 Review is owned by the Cursor Automation on this repo (GitHub login often `cursor`). It posts findings and a **formal GitHub review** (approve / request changes). It re-runs on push. Prefer review state on the **current head SHA** over top-level comments or `reviewDecision` (often null here).
 
@@ -38,35 +38,28 @@ Review is owned by the Cursor Automation on this repo (GitHub login often `curso
 
 Slack unavailable must **not** block the PR — use the agent-turn / EM message fallback when notifying Kunal.
 
-### Wake decision table (mutually exclusive)
+### Wake decision table (first match wins)
 
-Re-read first:
+Re-read with the same predicate as `submit-pr.sh` (do not hand-roll jq for approve):
 
 ```bash
-HEAD=$(gh pr view <n> --json headRefOid --jq .headRefOid)
-gh pr view <n> --json reviews,state,mergedAt \
-  --jq --arg head "$HEAD" '{
-    state,
-    head: $head,
-    latestOnHead: [
-      .reviews[]
-      | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED")
-      | select(.commit.oid == $head)
-      | {state, author: .author.login, submittedAt, commit: .commit.oid}
-    ] | sort_by(.submittedAt) | last
-  }'
-# CI: gh pr checks <n> / Actions for this head — terminal failure vs pending vs success
+pr=$(gh pr view <n> --json state,headRefOid,reviews)
+HEAD=$(jq -r .headRefOid <<<"$pr")
+jq -r .state <<<"$pr"
+# Exit 0 + APPROVED → approved row. Exit 1 is expected: CHANGES_REQUESTED or NONE (not a crash).
+node scripts/lib/approving-review.mjs --head "$HEAD" <<<"$pr" || true
+# CI for this head: terminal failure vs pending vs success (gh pr checks / Actions)
 ```
 
-Same approve rule as `scripts/lib/approving-review.mjs` / `submit-pr.sh`: latest decisive review **on this head** must be `APPROVED`.
+| # | Situation | Action |
+| --- | --- | --- |
+| 1 | PR merged or closed | Stop. Unsubscribe stuck timer if still listed. |
+| 2 | CI **failed** on this head | Fix, **push**, reset stuck timer (list → unsubscribe by `subscriptionId` → `subscribe_timer` 900s once). Do this **even if** the head is already `APPROVED` (the push needs a new approval). Do not ping Kunal. End turn. |
+| 3 | Latest decisive review on this head is `CHANGES_REQUESTED` | Fix, **push**, reset stuck timer (same reset steps). End turn. |
+| 4 | Latest decisive review on this head is `APPROVED` and CI is **not** failed | Unsubscribe stuck timer. **In this same turn** run `bash scripts/submit-pr.sh --pr <n>`. It waits if CI is still pending. Do **not** wait on `subscribe_github_ci`. If `submit-pr.sh` exits because CI failed → do row 2. If it exits because the head moved or approval is gone → re-read and apply this table again. Never squash-merge outside `submit-pr.sh`. |
+| 5 | Otherwise still waiting | **PR/CI wake:** keep waiting; do **not** restart the stuck timer. **Timer wake:** notify Kunal **once** (Slack send if available; else clear agent/EM message). Do not merge; do not spawn a reviewer; do not re-arm the timer until the next **push**. |
 
-| Situation | Action |
-| --- | --- |
-| PR merged or closed | Stop. Unsubscribe stuck timer if still listed. |
-| Latest on **current head** is `CHANGES_REQUESTED` (or clear new IMPORTANT/CRITICAL to act on) | Fix, **push**, reset stuck timer (list → unsubscribe by id → subscribe 900s once), renew PR/CI subs if needed, end turn. |
-| Latest on **current head** is `APPROVED` | Unsubscribe stuck timer. **In this same turn** run `bash scripts/submit-pr.sh --pr <n>` and stay until squash-merge or CI failure. Do **not** end the turn to wait on `subscribe_github_ci` (its success may already have been delivered). Never squash-merge outside `submit-pr.sh`. |
-| CI **failed** on current head | Fix, **push**, reset stuck timer, end turn. Do **not** ping Kunal for a CI failure you can fix. |
-| Still waiting (no approve and no request-changes on head; CI pending or green) | **PR/CI wake:** keep waiting; do **not** restart the stuck timer. **Timer wake:** notify Kunal **once** (Slack send if available; else clear agent/EM message). Do not merge; do not spawn a reviewer; do not re-arm the timer until the next **push**. |
+Do not use comment-body text as a merge or wake predicate — only formal review state on the head SHA (plus CI status for rows 2/4/5).
 
 ### Fallback (only if subscription tools are missing)
 
@@ -82,4 +75,4 @@ Satisfy AC. Behavior change → failing behavior test first. Colocate unit tests
 
 ## Address feedback
 
-Treat each finding as a **failure class**: root cause, sibling paths in scope, smallest fix that eliminates the class, proof that would have caught it. Then verify, **push** (restarts the 15m stuck clock), renew PR + CI subscriptions, end turn.
+Treat each finding as a **failure class**: root cause, sibling paths in scope, smallest fix that eliminates the class, proof that would have caught it. Then verify, **push**, and follow **Subscribe after each push** (that section owns timer reset + end turn).
