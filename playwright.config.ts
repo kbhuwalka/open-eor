@@ -3,7 +3,8 @@ import path from "node:path"
 import { defineConfig, devices } from "@playwright/test"
 
 const PORT = Number(process.env.PORT ?? 3000)
-const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${PORT}`
+// Next.js dev blocks cross-origin /_next assets from 127.0.0.1; use localhost.
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${PORT}`
 const nextBin = path.join(process.cwd(), "node_modules", ".bin", "next")
 
 export default defineConfig({
@@ -12,7 +13,8 @@ export default defineConfig({
   // One shared temp DB under CI/pre-push: serialize so writers do not race seed rows.
   workers: process.env.CI ? 1 : undefined,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  // Shared sqlite: do not replay a failed writer against the same file.
+  retries: 0,
   reporter: "list",
   use: {
     baseURL,
