@@ -24,9 +24,11 @@ CRITICAL = broken behavior / data loss / security / regression. IMPORTANT = arch
 
 ## Submit
 
-Post one comment with `submit-review.sh` and stop. The script exits 0 when the comment is posted. The first line of the comment is the verdict word `APPROVED` or `CHANGES_REQUESTED`. The owning engineer reads that line and, on `APPROVED`, runs `submit-pr.sh`.
+Post one comment with `submit-review.sh` and stop. The script exits 0 when the comment is posted. The first line of the comment is the verdict word `APPROVED` or `CHANGES_REQUESTED`.
 
-Do not call `gh pr review`, `addPullRequestReview`, or any approve, request-changes, or dismiss mutation. Do not run `submit-pr.sh`.
+This comment verdict does **not** satisfy `submit-pr.sh` (that script requires a formal GitHub approving review). For a manual gate that unblocks merge, a human (or the Automation) must leave a formal approve — this skill still must not call `gh pr review` / approve APIs.
+
+Do not run `submit-pr.sh`.
 
 ```bash
 bash scripts/submit-review.sh --pr <n> \
