@@ -1,8 +1,11 @@
 /**
  * Single owner of the local unit + e2e gate (husky pre-push + `pnpm test:precommit`).
  *
- * Uses node_modules/.bin binaries (no pnpm on PATH required), sets CI=true,
- * and runs Playwright against a temp SQLite/uploads tree outside the repo.
+ * - `pnpm test:precommit` always runs the suite (SKIP ignored).
+ * - husky calls this with `--hook`; only then may SKIP short-circuit.
+ *
+ * Vitest uses the parent environment (`pnpm test` parity). Playwright gets
+ * CI=true and a temp DATABASE_FILE/UPLOADS_ROOT outside the repo.
  */
 import { spawnSync } from "node:child_process"
 import fs from "node:fs"
@@ -18,48 +21,84 @@ import {
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const bin = (...names: string[]) => path.join(root, "node_modules", ".bin", ...names)
 
-function main(): number {
-  if (shouldSkipPrecommit(process.env.SKIP)) {
+/** Specs that mutate seed rows and need an exclusive DB copy (own work dir). */
+const EXCLUSIVE_E2E_SPECS = [
+  "e2e/finance-portal.spec.ts",
+  "e2e/onboarding-specialist.spec.ts",
+  "e2e/task-home-filters.spec.ts",
+] as const
+
+function main(argv: string[]): number {
+  const asHook = argv.includes("--hook")
+  if (asHook && shouldSkipPrecommit(process.env.SKIP)) {
     console.log(`test-precommit: skipped (SKIP=${process.env.SKIP})`)
     return 0
   }
 
-  const workDir = defaultPrecommitWorkDir()
-  fs.mkdirSync(workDir, { recursive: true })
-  fs.mkdirSync(path.join(workDir, "uploads"), { recursive: true })
-
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    ...buildPrecommitEnv({ cwd: root, workDir }),
-  }
-  // Drop inherited base URL so Playwright starts webServer with our DATABASE_FILE.
-  delete env.PLAYWRIGHT_BASE_URL
-
+  const workDirs: string[] = []
   const cleanup = () => {
-    try {
-      fs.rmSync(workDir, { recursive: true, force: true })
-    } catch {
-      // best-effort
+    for (const dir of workDirs) {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true })
+      } catch {
+        /* best-effort */
+      }
     }
   }
 
   try {
-    console.log(`test-precommit: DATABASE_FILE=${env.DATABASE_FILE} PORT=${env.PORT} CI=${env.CI}`)
-
-    // Cap workers and raise the default timeout so the hook stays reliable on
-    // smaller cloud VMs (SQLite-heavy suites otherwise trip the 5s default).
-    const vitest = run(
-      bin("vitest"),
-      ["run", "--maxWorkers=2", "--testTimeout=30000"],
-      env,
-    )
+    // Same as `pnpm test`: parent env only, plain `vitest run`.
+    const vitest = run(bin("vitest"), ["run"], { ...process.env })
     if (vitest !== 0) return vitest
 
-    const playwright = run(bin("playwright"), ["test"], env)
-    return playwright
+    const sharedWork = defaultPrecommitWorkDir()
+    workDirs.push(sharedWork)
+    fs.mkdirSync(path.join(sharedWork, "uploads"), { recursive: true })
+    const sharedEnv = playwrightEnv(sharedWork)
+    console.log(
+      `test-precommit: shared DATABASE_FILE=${sharedEnv.DATABASE_FILE} PORT=${sharedEnv.PORT} CI=${sharedEnv.CI}`,
+    )
+
+    const sharedSpecs = listSharedSpecs()
+    const shared = run(bin("playwright"), ["test", ...sharedSpecs], sharedEnv)
+    if (shared !== 0) return shared
+
+    let port = Number(sharedEnv.PORT) + 1
+    for (const spec of EXCLUSIVE_E2E_SPECS) {
+      const workDir = `${defaultPrecommitWorkDir()}-${path.basename(spec, ".spec.ts")}`
+      workDirs.push(workDir)
+      fs.mkdirSync(path.join(workDir, "uploads"), { recursive: true })
+      const env = playwrightEnv(workDir, port)
+      port += 1
+      console.log(`test-precommit: exclusive ${spec} DATABASE_FILE=${env.DATABASE_FILE} PORT=${env.PORT}`)
+      const code = run(bin("playwright"), ["test", spec], env)
+      if (code !== 0) return code
+    }
+
+    return 0
   } finally {
     cleanup()
   }
+}
+
+function listSharedSpecs(): string[] {
+  const dir = path.join(root, "e2e")
+  const exclusive = new Set(EXCLUSIVE_E2E_SPECS.map((s) => path.basename(s)))
+  return fs
+    .readdirSync(dir)
+    .filter((name) => name.endsWith(".spec.ts") && !exclusive.has(name))
+    .map((name) => path.join("e2e", name))
+}
+
+function playwrightEnv(workDir: string, port?: number): NodeJS.ProcessEnv {
+  const built = buildPrecommitEnv({ cwd: root, workDir, port })
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    ...built,
+  }
+  delete env.PLAYWRIGHT_BASE_URL
+  delete env.E2E_DATABASE_FILE
+  return env
 }
 
 function run(command: string, args: string[], env: NodeJS.ProcessEnv): number {
@@ -76,4 +115,4 @@ function run(command: string, args: string[], env: NodeJS.ProcessEnv): number {
   return result.status ?? 1
 }
 
-process.exit(main())
+process.exit(main(process.argv.slice(2)))

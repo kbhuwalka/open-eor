@@ -1,12 +1,7 @@
 #!/usr/bin/env sh
-# Escape hatches: SKIP=pre-push|pre-commit|tests|all  |  HUSKY=0  |  git push --no-verify
-# See README "Pre-push hooks" and scripts/precommit-env.ts (SKIP tokens).
+# Escape hatches (honored only via --hook): SKIP=pre-push|pre-commit|tests|all
+# Also: HUSKY=0 | git push --no-verify
+# See README "Pre-push hooks" and scripts/precommit-env.ts.
 set -e
-case ",${SKIP:-}," in
-  *,pre-push,*|*,pre-commit,*|*,tests,*|*,all,*)
-    echo "pre-push: skipped (SKIP=${SKIP})"
-    exit 0
-    ;;
-esac
 ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
-exec "$ROOT/node_modules/.bin/tsx" "$ROOT/scripts/test-precommit.ts"
+exec "$ROOT/node_modules/.bin/tsx" "$ROOT/scripts/test-precommit.ts" --hook

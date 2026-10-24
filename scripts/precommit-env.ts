@@ -1,6 +1,6 @@
 /**
  * Policy for the local pre-push test run (unit then Playwright).
- * Husky `.husky/pre-push` must honor the same SKIP tokens as {@link shouldSkipPrecommit}.
+ * SKIP is honored only when `scripts/test-precommit.ts` is invoked with `--hook`.
  */
 import path from "node:path"
 import os from "node:os"
@@ -30,7 +30,6 @@ export type PrecommitEnv = {
   CI: "true"
   DATABASE_FILE: string
   UPLOADS_ROOT: string
-  E2E_DATABASE_FILE: string
   PORT: string
 }
 
@@ -38,6 +37,9 @@ export type PrecommitEnv = {
  * Builds the environment Playwright + Next must share for a safe pre-push run:
  * CI semantics (no reuse of an existing dev server) and a SQLite/uploads tree
  * outside the repo (required by `writeLiveDb` / Turbopack WAL rules).
+ *
+ * Does not set `E2E_DATABASE_FILE` — that opts `client-signing.spec.ts` into a
+ * destructive private-copy flow and must stay unset for the shared gate.
  */
 export function buildPrecommitEnv(input: PrecommitEnvInput): PrecommitEnv {
   const workDir = path.resolve(input.workDir)
@@ -49,14 +51,10 @@ export function buildPrecommitEnv(input: PrecommitEnvInput): PrecommitEnv {
   }
   const databaseFile = path.join(workDir, "eor.sqlite")
   const uploadsRoot = path.join(workDir, "uploads")
-  if (isPathInside(databaseFile, cwd)) {
-    throw new Error(`DATABASE_FILE must be outside the project: ${databaseFile}`)
-  }
   return {
     CI: "true",
     DATABASE_FILE: databaseFile,
     UPLOADS_ROOT: uploadsRoot,
-    E2E_DATABASE_FILE: databaseFile,
     PORT: String(input.port ?? 3720),
   }
 }

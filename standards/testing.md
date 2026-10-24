@@ -215,8 +215,9 @@ pnpm lint && pnpm test:precommit && pnpm build
 from `node_modules/.bin`, `CI=true`, and a temp `DATABASE_FILE` / `UPLOADS_ROOT`
 outside the repo (cleaned up on exit). Husky pre-push runs the same script.
 CI Quality Gates remain Lint + Production Build. If verification or the hook is
-skipped (`SKIP=pre-push|tests|all`, `HUSKY=0`, or `git push --no-verify`),
-explain why in the PR.
+skipped via husky (`SKIP=pre-push|tests|all` with `--hook`, `HUSKY=0`, or
+`git push --no-verify`), explain why in the PR. `pnpm test:precommit` always
+runs the suite (SKIP is ignored).
 
 ---
 

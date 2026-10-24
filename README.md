@@ -61,7 +61,7 @@ Skip when needed (documented escape hatches):
 
 | Method | Effect |
 | --- | --- |
-| `SKIP=pre-push git push …` | Skips this hook (`SKIP=pre-commit`, `tests`, or `all` also work) |
+| `SKIP=pre-push git push …` | Skips the husky hook only (`SKIP=pre-commit`, `tests`, or `all` also work). `pnpm test:precommit` always runs the suite. |
 | `HUSKY=0 git push …` | Disables all husky hooks for that command |
 | `git push --no-verify` | Git built-in; skips all hooks |
 

@@ -34,7 +34,7 @@ describe("shouldSkipPrecommit", () => {
 describe("buildPrecommitEnv", () => {
   const cwd = path.join(os.tmpdir(), "fake-repo-root")
 
-  it("sets CI=true and points DB/uploads outside the project", () => {
+  it("sets CI=true and points DB/uploads outside the project without E2E_DATABASE_FILE", () => {
     const workDir = path.join(os.tmpdir(), "precommit-work")
     const env = buildPrecommitEnv({ cwd, workDir, port: 3720 })
 
@@ -42,7 +42,7 @@ describe("buildPrecommitEnv", () => {
     expect(env.PORT).toBe("3720")
     expect(env.DATABASE_FILE).toBe(path.join(workDir, "eor.sqlite"))
     expect(env.UPLOADS_ROOT).toBe(path.join(workDir, "uploads"))
-    expect(env.E2E_DATABASE_FILE).toBe(env.DATABASE_FILE)
+    expect(env).not.toHaveProperty("E2E_DATABASE_FILE")
     expect(path.relative(cwd, env.DATABASE_FILE).startsWith("..")).toBe(true)
   })
 
