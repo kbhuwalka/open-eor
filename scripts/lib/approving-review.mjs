@@ -76,11 +76,15 @@ function runCli(argv, stdinText) {
     console.error("error: stdin must be JSON with a reviews array")
     process.exit(2)
   }
-  const reviews = payload.reviews ?? payload
-  const result = approvingReviewOnHead(
-    Array.isArray(reviews) ? reviews : [],
-    headSha,
-  )
+  if (
+    payload === null ||
+    typeof payload !== "object" ||
+    !Array.isArray(payload.reviews)
+  ) {
+    console.error("error: stdin JSON must include a reviews array")
+    process.exit(2)
+  }
+  const result = approvingReviewOnHead(payload.reviews, headSha)
   process.stdout.write(`${result.state}\t${result.author}\n`)
   process.exit(result.ok ? 0 : 1)
 }

@@ -79,8 +79,10 @@ OPTIONS
 
 EXIT CODES
   0  Checks passed (and PR merged unless --no-merge was given)
-  1  No approving review, CI failed, timed out, run not found, Actions API forbidden, or merge failed
+  1  Quality Gates CI failed on the head (required jobs red)
   2  PR has merge conflicts — CI was not watched for merge
+  3  Head moved or approving review missing/gone on the head SHA
+  4  Gave up — timeout, Actions 403, no Quality Gates run, merge error, or broken review gate
 
 EXAMPLES
   bash scripts/submit-pr.sh --pr 7
@@ -165,6 +167,12 @@ print_progress() {
     "$PR" "$(fmt_time "$elapsed")" "$(fmt_time "$TIMEOUT")" "$symbols"
 }
 
+# Exit helpers — implement-issue switches on these codes (do not parse stderr).
+exit_ci_failed() { exit 1; }
+exit_conflict() { exit 2; }
+exit_head_or_approval() { exit 3; }
+exit_gave_up() { exit 4; }
+
 # Require approving review on headSha. Sets REVIEW_AUTHOR on success.
 # stdin unused — takes reviews JSON string as $1 and head as $2.
 require_approving_review() {
@@ -182,14 +190,14 @@ require_approving_review() {
   if [[ $status -eq 2 ]]; then
     echo "✗ PR #${PR} — approving-review gate failed (module/CLI error)" >&2
     echo "  ${out}" >&2
-    exit 1
+    exit_gave_up
   fi
   if [[ $status -ne 0 || "$state" != "APPROVED" ]]; then
     echo "✗ PR #${PR} — no approving GitHub review on head ${head_sha:0:7}" >&2
     echo "  Latest decisive review on this head: ${state}${author:+ (from ${author})}" >&2
     echo "  Wait for Automation (or another reviewer) to formally approve this commit," >&2
     echo "  then re-run. CI green alone is not review passed. Stale-SHA approvals do not count." >&2
-    exit 1
+    exit_head_or_approval
   fi
   REVIEW_AUTHOR="$author"
 }
@@ -200,14 +208,14 @@ do_merge() {
   if ! merge_json=$(gh pr view "$PR" --json headRefOid,reviews 2>&1); then
     echo "✗ PR #${PR} — could not re-fetch PR before merge" >&2
     echo "  ${merge_json}" >&2
-    exit 1
+    exit_gave_up
   fi
   local live_head
   live_head=$(echo "$merge_json" | jq -r '.headRefOid')
   if [[ "$live_head" != "$HEAD_SHA" ]]; then
     echo "✗ PR #${PR} — head moved during CI watch (${HEAD_SHA:0:7} → ${live_head:0:7})" >&2
     echo "  Re-run submit-pr after Automation approves the new head." >&2
-    exit 1
+    exit_head_or_approval
   fi
   local reviews_json
   reviews_json=$(echo "$merge_json" | jq -c '{reviews: .reviews}')
@@ -220,7 +228,7 @@ do_merge() {
     echo "  ${output}" >&2
     echo "  Required: an approving GitHub review on the head SHA and green Quality Gates." >&2
     echo "  Merge uses --match-head-commit ${HEAD_SHA:0:7} so a raced push cannot slip through." >&2
-    exit 1
+    exit_gave_up
   fi
   echo "✓ PR #${PR} — merged"
 
@@ -400,22 +408,22 @@ find_latest_quality_gate_run() {
   printf '%s\n' "$runs" | jq -r '.[0].databaseId // empty'
 }
 
-# Sets CHECK_STATE. Exits 1 on Actions 403 or any other read failure.
+# Sets CHECK_STATE. Exits 4 (gave up) on Actions 403 or any other read failure.
 read_check_state() {
   local status=0
   CHECK_STATE="$(required_checks_state)" || status=$?
   if [[ $status -eq 2 ]]; then
-    exit 1
+    exit_gave_up
   fi
   if [[ $status -ne 0 ]]; then
     echo "error: could not read Actions workflow runs for PR #${PR} (head ${HEAD_SHA:0:7})." >&2
-    exit 1
+    exit_gave_up
   fi
   case "$CHECK_STATE" in
     SUCCESS|PENDING|FAILURE) ;;
     *)
       echo "error: unexpected Actions check state '${CHECK_STATE}' for PR #${PR}." >&2
-      exit 1
+      exit_gave_up
       ;;
   esac
 }
@@ -433,7 +441,7 @@ pr_json=""
 if ! pr_json=$(gh pr view "$PR" --json mergeable,headRefName,headRefOid,reviews 2>&1); then
   echo "✗ PR #${PR} — could not fetch PR details" >&2
   echo "  ${pr_json}" >&2
-  exit 1
+  exit_gave_up
 fi
 
 MERGEABLE=$(echo "$pr_json" | jq -r '.mergeable')
@@ -450,7 +458,7 @@ if [[ "$MERGEABLE" == "CONFLICTING" ]]; then
   echo "✗ PR #${PR} has merge conflicts" >&2
   echo "  Branch: ${BRANCH}" >&2
   echo "  Resolve the conflict and push before re-submitting." >&2
-  exit 2
+  exit_conflict
 fi
 
 REVIEW_AUTHOR=""
@@ -476,7 +484,7 @@ fi
 if [[ "$CHECK_STATE" == "FAILURE" ]]; then
   echo "✗ PR #${PR} — required checks already failed on current commit" >&2
   echo "  Required: ${REQUIRED_CHECKS[*]}" >&2
-  exit 1
+  exit_ci_failed
 fi
 
 # ---------------------------------------------------------------------------
@@ -486,11 +494,11 @@ fi
 run_lookup_status=0
 RUN_ID="$(find_active_quality_gate_run)" || run_lookup_status=$?
 if [[ $run_lookup_status -eq 2 ]]; then
-  exit 1
+  exit_gave_up
 fi
 if [[ $run_lookup_status -ne 0 ]]; then
   echo "error: could not list Actions workflow runs for PR #${PR} (head ${HEAD_SHA:0:7})." >&2
-  exit 1
+  exit_gave_up
 fi
 if [[ -n "$RUN_ID" ]]; then
   echo "PR #${PR} — checks already running on ${BRANCH}; watching run ${RUN_ID}..."
@@ -502,21 +510,21 @@ else
     run_lookup_status=0
     RUN_ID="$(find_active_quality_gate_run)" || run_lookup_status=$?
     if [[ $run_lookup_status -eq 2 ]]; then
-      exit 1
+      exit_gave_up
     fi
     if [[ $run_lookup_status -ne 0 ]]; then
       echo "error: could not list Actions workflow runs for PR #${PR} (head ${HEAD_SHA:0:7})." >&2
-      exit 1
+      exit_gave_up
     fi
     if [[ -z "$RUN_ID" ]]; then
       run_lookup_status=0
       RUN_ID="$(find_latest_quality_gate_run)" || run_lookup_status=$?
       if [[ $run_lookup_status -eq 2 ]]; then
-        exit 1
+        exit_gave_up
       fi
       if [[ $run_lookup_status -ne 0 ]]; then
         echo "error: could not list Actions workflow runs for PR #${PR} (head ${HEAD_SHA:0:7})." >&2
-        exit 1
+        exit_gave_up
       fi
       # Completed or still queued: watch (or re-read) this run below.
       if [[ -n "$RUN_ID" ]]; then
@@ -543,7 +551,7 @@ else
     echo "✗ PR #${PR} — no Quality Gates run appeared within ~120s" >&2
     echo "  Branch: ${BRANCH}" >&2
     echo "  Ensure the Quality Gates workflow is enabled and the PR targets main." >&2
-    exit 1
+    exit_gave_up
   fi
 
   echo "PR #${PR} — found run ${RUN_ID}, watching..."
@@ -601,12 +609,12 @@ FINAL="$(gh_actions run view "$RUN_ID" --repo "$REPO_NWO" --json status,conclusi
     failed:     [.jobs[] | select(.conclusion == "failure") | .name]
   }')" || run_lookup_status=$?
 if [[ $run_lookup_status -eq 2 ]]; then
-  exit 1
+  exit_gave_up
 fi
 if [[ $run_lookup_status -ne 0 ]]; then
   echo "✗ PR #${PR} — could not fetch final run status" >&2
   echo "  Run: ${RUN_URL}" >&2
-  exit 1
+  exit_gave_up
 fi
 
 CONCLUSION=$(echo "$FINAL" | jq -r '.conclusion')
@@ -616,7 +624,7 @@ if [[ "$WATCH_EXIT" -ne 0 && "$STATUS" != "completed" ]]; then
   echo "✗ PR #${PR} — timed out after $(fmt_time "$TIMEOUT")" >&2
   echo "  Run: ${RUN_URL}" >&2
   cancel_run "$RUN_ID" || true
-  exit 1
+  exit_gave_up
 fi
 
 if [[ "$CONCLUSION" != "success" ]]; then
@@ -626,7 +634,7 @@ if [[ "$CONCLUSION" != "success" ]]; then
     echo "  Failed checks: ${FAILED_JOBS}" >&2
   fi
   echo "  Run: ${RUN_URL}" >&2
-  exit 1
+  exit_ci_failed
 fi
 
 # Double-check required job names succeeded (workflow may add extra jobs later).
@@ -636,7 +644,7 @@ if [[ "$CHECK_STATE" != "SUCCESS" ]]; then
   echo "  Required: ${REQUIRED_CHECKS[*]}" >&2
   echo "  State: ${CHECK_STATE}" >&2
   echo "  Run: ${RUN_URL}" >&2
-  exit 1
+  exit_ci_failed
 fi
 
 echo "✓ PR #${PR} — all required checks passed"

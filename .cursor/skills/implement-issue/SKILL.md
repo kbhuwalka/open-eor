@@ -36,8 +36,6 @@ Review is owned by the Cursor Automation on this repo (GitHub login often `curso
    3. `subscribe_timer` with that name, `delaySeconds: 900`, `once: true`. Prompt: “Apply the implement-issue Wake decision table for PR \<n\> (timer wake).”
 4. State what you are waiting for, then **end the turn**.
 
-When notifying Kunal of a stuck PR, post to Slack `#spacexsi-demo-factory` (`C0CBESZU7TR`) and **also** send a clear note to the EM (Project chat). Prefer a **Cursor-bot** send path (Automations **Send to Slack**) when available — user Slack MCP posts as Kunal and **will not notify him** of his own messages. Inviting `@Cursor` to the channel does not change MCP authorship. Setup: Project store `docs/factory-stuck-slack-as-cursor.md`. Slack unavailable must **not** block the PR — EM/agent-turn message is enough to stop silently.
-
 ### Wake decision table (first match wins)
 
 Re-read with the same predicate as `submit-pr.sh` (do not hand-roll jq for approve):
@@ -46,20 +44,25 @@ Re-read with the same predicate as `submit-pr.sh` (do not hand-roll jq for appro
 pr=$(gh pr view <n> --json state,headRefOid,reviews)
 HEAD=$(jq -r .headRefOid <<<"$pr")
 jq -r .state <<<"$pr"
-# Exit 0 + APPROVED → approved row. Exit 1 is expected: CHANGES_REQUESTED or NONE (not a crash).
-node scripts/lib/approving-review.mjs --head "$HEAD" <<<"$pr" || true
-# CI for this head: terminal failure vs pending vs success (gh pr checks / Actions)
+set +e
+gate=$(node scripts/lib/approving-review.mjs --head "$HEAD" <<<"$pr")
+gate_rc=$?
+set -e
+# gate_rc 0 + APPROVED → approved. gate_rc 1 → CHANGES_REQUESTED or NONE (expected).
+# gate_rc 2 → broken gate input; stop the turn and report (do not continue the table).
+# CI = the four Quality Gates jobs (Lint, Unit Tests, Production Build, End-to-End Tests)
+# via Actions / submit-pr semantics — not the full `gh pr checks` list (that includes Automation).
 ```
 
 | # | Situation | Action |
 | --- | --- | --- |
 | 1 | PR merged or closed | Stop. Unsubscribe stuck timer if still listed. |
-| 2 | CI **failed** on this head | Fix, **push**, reset stuck timer (list → unsubscribe by `subscriptionId` → `subscribe_timer` 900s once). Do this **even if** the head is already `APPROVED` (the push needs a new approval). Do not ping Kunal. End turn. |
+| 2 | Quality Gates **failed** on this head | Fix, **push**, reset stuck timer (list → unsubscribe by `subscriptionId` → `subscribe_timer` 900s once). Do this **even if** the head is already `APPROVED` (the push needs a new approval). Do not ping Kunal. End turn. |
 | 3 | Latest decisive review on this head is `CHANGES_REQUESTED` | Fix, **push**, reset stuck timer (same reset steps). End turn. |
-| 4 | Latest decisive review on this head is `APPROVED` and CI is **not** failed | Unsubscribe stuck timer. **In this same turn** run `bash scripts/submit-pr.sh --pr <n>`. It waits if CI is still pending. Do **not** wait on `subscribe_github_ci`. If `submit-pr.sh` exits because CI failed → do row 2. If it exits because the head moved or approval is gone → re-read and apply this table again. Never squash-merge outside `submit-pr.sh`. |
-| 5 | Otherwise still waiting | **PR/CI wake:** keep waiting; do **not** restart the stuck timer. **Timer wake:** notify Kunal **once** (Slack send if available; else clear agent/EM message). Do not merge; do not spawn a reviewer; do not re-arm the timer until the next **push**. |
+| 4 | Latest decisive review on this head is `APPROVED` and Quality Gates are **not** failed | **Keep the stuck timer armed.** In this same turn run `bash scripts/submit-pr.sh --pr <n>` (it waits if CI is still pending). Do **not** wait on `subscribe_github_ci`. Switch only on the script’s exit code — do not parse stderr: **0** → success (row 1 unsubscribes after merge); **1** (CI failure) → row 2; **2** (conflicts) or **3** (head moved / approval gone) → fix, **push**, reset timer, end turn; **4** (gave up: timeout, Actions 403, no Quality Gates run, merge error, gate broken) → end the turn and **leave the timer armed**. Never squash-merge outside `submit-pr.sh`. |
+| 5 | Otherwise still waiting | **PR/CI wake:** keep waiting; do **not** restart the stuck timer. **Timer wake:** always message the EM (Project chat) once. Also post to `#spacexsi-demo-factory` (`C0CBESZU7TR`) **only** via a Cursor-bot sender (e.g. Automations Send-to-Slack / Slack poster webhook) — **never** user Slack MCP (posts as Kunal and does not notify him). Do not merge; do not spawn a reviewer; do not re-arm the timer until the next **push**. |
 
-Do not use comment-body text as a merge or wake predicate — only formal review state on the head SHA (plus CI status for rows 2/4/5).
+Do not use comment-body text as a merge or wake predicate — only formal review state on the head SHA (plus Quality Gates status for rows 2/4/5).
 
 ### Fallback (only if subscription tools are missing)
 
