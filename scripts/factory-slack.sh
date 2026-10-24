@@ -40,7 +40,10 @@ OPTIONS
 
 ENV
   FACTORY_SLACK_POSTER_WEBHOOK_URL   Automation webhook URL
-  FACTORY_SLACK_POSTER_WEBHOOK_KEY   Bearer / API key for the webhook
+  FACTORY_SLACK_POSTER_WEBHOOK_KEY   Auth header from the Automations UI (full
+                                     "Authorization: Bearer …" or the header
+                                     value "Bearer …"). Not a bare key — do not
+                                     store a key and expect this script to wrap it.
 
 Does not print secret values. Prefer this over user Slack MCP (which posts as Kunal and does not notify him).
 EOF
@@ -71,17 +74,34 @@ fi
 
 # Strip CR/LF — trailing newlines in secrets break HTTP/2 Authorization headers.
 URL="$(printf '%s' "${FACTORY_SLACK_POSTER_WEBHOOK_URL:-}" | tr -d '\r\n')"
-KEY="$(printf '%s' "${FACTORY_SLACK_POSTER_WEBHOOK_KEY:-}" | tr -d '\r\n')"
-# If the stored secret already includes the "Bearer " prefix, do not double it.
-AUTH_VALUE="$KEY"
-if [[ "$AUTH_VALUE" != [Bb]earer\ * ]]; then
-  AUTH_VALUE="Bearer ${KEY}"
-fi
+# KEY secret is the Automations UI auth header (not a bare API key).
+# Accept:
+#   Authorization: Bearer <token>
+#   Bearer <token>
+# Do not double-prefix Bearer.
+AUTH_RAW="$(printf '%s' "${FACTORY_SLACK_POSTER_WEBHOOK_KEY:-}" | tr -d '\r\n')"
+AUTH_RAW="${AUTH_RAW#"${AUTH_RAW%%[![:space:]]*}"}"  # ltrim
+AUTH_RAW="${AUTH_RAW%"${AUTH_RAW##*[![:space:]]}"}"  # rtrim
 
-if [[ -z "$URL" || -z "$KEY" ]]; then
+if [[ -z "$URL" || -z "$AUTH_RAW" ]]; then
   echo "error: FACTORY_SLACK_POSTER_WEBHOOK_URL and FACTORY_SLACK_POSTER_WEBHOOK_KEY must be set in the cloud environment secrets" >&2
   exit 2
 fi
+
+# Build a single curl -H argument: "Authorization: …"
+AUTH_HEADER=""
+case "$AUTH_RAW" in
+  [Aa]uthorization:*)
+    AUTH_HEADER="$AUTH_RAW"
+    ;;
+  [Bb]earer\ *)
+    AUTH_HEADER="Authorization: ${AUTH_RAW}"
+    ;;
+  *)
+    echo "error: FACTORY_SLACK_POSTER_WEBHOOK_KEY must be the Automations UI auth header (e.g. 'Bearer …' or 'Authorization: Bearer …'), not a bare key" >&2
+    exit 2
+    ;;
+esac
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "error: jq is required" >&2
@@ -104,12 +124,11 @@ payload=$(
     '
 )
 
-# Do not log URL, key, or full payload (may contain sensitive ops text).
+# Do not log URL, auth header, or full payload.
 http_code=$(
   curl -sS -o /tmp/factory-slack-poster-body.$$ -w "%{http_code}" \
     -X POST "$URL" \
-    -H "Authorization: ${AUTH_VALUE}" \
-    -H "X-Automation-Key: ${KEY}" \
+    -H "${AUTH_HEADER}" \
     -H "Content-Type: application/json" \
     --data-binary "$payload"
 ) || {
