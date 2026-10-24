@@ -108,9 +108,15 @@ MERGE=true
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --pr)        PR="$2";      shift 2 ;;
-    --issue)     ISSUE="$2";   shift 2 ;;
-    --timeout)   TIMEOUT="$2"; shift 2 ;;
+    --pr)
+      [[ $# -ge 2 ]] || { echo "error: --pr requires a value" >&2; exit 4; }
+      PR="$2"; shift 2 ;;
+    --issue)
+      [[ $# -ge 2 ]] || { echo "error: --issue requires a value" >&2; exit 4; }
+      ISSUE="$2"; shift 2 ;;
+    --timeout)
+      [[ $# -ge 2 ]] || { echo "error: --timeout requires a value" >&2; exit 4; }
+      TIMEOUT="$2"; shift 2 ;;
     --no-merge)  MERGE=false;  shift   ;;
     *)
       echo "error: unknown argument: $1" >&2

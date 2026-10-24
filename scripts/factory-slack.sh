@@ -2,8 +2,9 @@
 # factory-slack.sh — Post one message via the Slack-poster Cursor Automation webhook.
 #
 # Posts as @Cursor (bot). Requires cloud env secrets (never commit them):
-#   FACTORY_SLACK_POSTER_WEBHOOK_URL
-#   FACTORY_SLACK_POSTER_WEBHOOK_KEY
+#   FACTORY_SLACK_POSTER_WEBHOOK_URL   — webhook URL
+#   FACTORY_SLACK_POSTER_WEBHOOK_KEY   — webhook API key / Automations auth header
+#     (bare key, "Bearer …", or "Authorization: Bearer …" — normalized to one header)
 #
 # Usage:
 #   bash scripts/factory-slack.sh --message "…"
@@ -16,11 +17,12 @@
 # EXIT CODES
 #   0  Webhook accepted the request (HTTP 2xx)
 #   1  Usage / missing args
-#   2  Missing secrets in the environment
-#   3  Webhook HTTP error or empty response failure
+#   2  Missing / invalid secrets (incl. URL pasted into KEY)
+#   3  Webhook HTTP error or curl failure
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHANNEL_ID=""
 CHANNEL=""
 MESSAGE=""
@@ -35,15 +37,13 @@ USAGE
 
 OPTIONS
   --message <text>       Message body (required). Markdown OK; include <@U…> mentions as needed.
-  --channel-id <id>      Slack channel ID (default: C0CBESZU7TR)
+  --channel-id <id>      Slack channel ID (default: C0CBESZU7TR). Prefer this over --channel.
   --channel <name>       Channel name (e.g. #spacexsi-demo-factory); used only if --channel-id omitted
 
 ENV
   FACTORY_SLACK_POSTER_WEBHOOK_URL   Automation webhook URL
-  FACTORY_SLACK_POSTER_WEBHOOK_KEY   Auth header from the Automations UI (full
-                                     "Authorization: Bearer …" or the header
-                                     value "Bearer …"). Not a bare key — do not
-                                     store a key and expect this script to wrap it.
+  FACTORY_SLACK_POSTER_WEBHOOK_KEY   Webhook API key or Automations auth header
+                                     (bare / Bearer … / Authorization: Bearer …)
 
 Does not print secret values. Prefer this over user Slack MCP (which posts as Kunal and does not notify him).
 EOF
@@ -52,9 +52,15 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h) usage; exit 0 ;;
-    --message)    MESSAGE="$2";    shift 2 ;;
-    --channel-id) CHANNEL_ID="$2"; shift 2 ;;
-    --channel)    CHANNEL="$2";    shift 2 ;;
+    --message)
+      [[ $# -ge 2 ]] || { echo "error: --message requires a value" >&2; exit 1; }
+      MESSAGE="$2"; shift 2 ;;
+    --channel-id)
+      [[ $# -ge 2 ]] || { echo "error: --channel-id requires a value" >&2; exit 1; }
+      CHANNEL_ID="$2"; shift 2 ;;
+    --channel)
+      [[ $# -ge 2 ]] || { echo "error: --channel requires a value" >&2; exit 1; }
+      CHANNEL="$2"; shift 2 ;;
     *)
       echo "error: unknown argument: $1" >&2
       usage >&2
@@ -72,37 +78,18 @@ if [[ -z "$CHANNEL_ID" && -z "$CHANNEL" ]]; then
   CHANNEL_ID="C0CBESZU7TR"
 fi
 
-# Strip CR/LF — trailing newlines in secrets break HTTP/2 Authorization headers.
-URL="$(printf '%s' "${FACTORY_SLACK_POSTER_WEBHOOK_URL:-}" | tr -d '\r\n')"
-# KEY secret is the Automations UI auth header (not a bare API key).
-# Accept:
-#   Authorization: Bearer <token>
-#   Bearer <token>
-# Do not double-prefix Bearer.
-AUTH_RAW="$(printf '%s' "${FACTORY_SLACK_POSTER_WEBHOOK_KEY:-}" | tr -d '\r\n')"
-AUTH_RAW="${AUTH_RAW#"${AUTH_RAW%%[![:space:]]*}"}"  # ltrim
-AUTH_RAW="${AUTH_RAW%"${AUTH_RAW##*[![:space:]]}"}"  # rtrim
+URL="$(printf '%s' "${FACTORY_SLACK_POSTER_WEBHOOK_URL:-}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+KEY_RAW="$(printf '%s' "${FACTORY_SLACK_POSTER_WEBHOOK_KEY:-}")"
 
-if [[ -z "$URL" || -z "$AUTH_RAW" ]]; then
+if [[ -z "$URL" || -z "${KEY_RAW//[$'\r\n[:space:]]/}" ]]; then
   echo "error: FACTORY_SLACK_POSTER_WEBHOOK_URL and FACTORY_SLACK_POSTER_WEBHOOK_KEY must be set in the cloud environment secrets" >&2
   exit 2
 fi
 
-# Build a single curl -H argument: "Authorization: …"
-AUTH_HEADER=""
-case "$AUTH_RAW" in
-  [Aa]uthorization:*)
-    AUTH_HEADER="$AUTH_RAW"
-    ;;
-  [Bb]earer\ *)
-    AUTH_HEADER="Authorization: ${AUTH_RAW}"
-    ;;
-  *)
-    echo "error: FACTORY_SLACK_POSTER_WEBHOOK_KEY must be the Automations UI auth header (e.g. 'Bearer …' or 'Authorization: Bearer …'), not a bare key" >&2
-    exit 2
-    ;;
-esac
-
+if ! command -v node >/dev/null 2>&1; then
+  echo "error: node is required" >&2
+  exit 1
+fi
 if ! command -v jq >/dev/null 2>&1; then
   echo "error: jq is required" >&2
   exit 1
@@ -112,43 +99,46 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
-payload=$(
-  jq -nc \
-    --arg message "$MESSAGE" \
-    --arg channelId "$CHANNEL_ID" \
-    --arg channel "$CHANNEL" \
-    '
-      {message: $message}
-      + (if $channelId != "" then {channelId: $channelId} else {} end)
-      + (if $channel != "" then {channel: $channel} else {} end)
-    '
-)
+AUTH_HEADER=""
+norm_status=0
+AUTH_HEADER="$(
+  printf '%s' "$KEY_RAW" | node "${SCRIPT_DIR}/lib/factory-slack-auth.mjs" --normalize
+)" || norm_status=$?
+if [[ $norm_status -ne 0 || -z "$AUTH_HEADER" ]]; then
+  echo "error: could not normalize FACTORY_SLACK_POSTER_WEBHOOK_KEY (need webhook API key, not the webhook URL)" >&2
+  exit 2
+fi
 
-# Do not log URL, auth header, or full payload.
+if [[ -n "$CHANNEL_ID" ]]; then
+  payload=$(jq -nc --arg message "$MESSAGE" --arg channelId "$CHANNEL_ID" \
+    '{message: $message, channelId: $channelId}')
+else
+  payload=$(jq -nc --arg message "$MESSAGE" --arg channel "$CHANNEL" \
+    '{message: $message, channel: $channel}')
+fi
+
+body_file=$(mktemp)
+trap 'rm -f "$body_file"' EXIT
+
 http_code=$(
-  curl -sS -o /tmp/factory-slack-poster-body.$$ -w "%{http_code}" \
+  curl -sS --max-time 30 -o "$body_file" -w "%{http_code}" \
     -X POST "$URL" \
     -H "${AUTH_HEADER}" \
     -H "Content-Type: application/json" \
     --data-binary "$payload"
 ) || {
-  rm -f /tmp/factory-slack-poster-body.$$
   echo "error: curl failed talking to Slack-poster webhook" >&2
   exit 3
 }
 
-body_file=/tmp/factory-slack-poster-body.$$
 if [[ "$http_code" =~ ^2 ]]; then
   echo "✓ factory-slack — posted (HTTP ${http_code})"
-  rm -f "$body_file"
   exit 0
 fi
 
 echo "✗ factory-slack — webhook returned HTTP ${http_code}" >&2
-# Body may contain automation errors; truncate and avoid echoing secrets.
 if [[ -s "$body_file" ]]; then
   head -c 500 "$body_file" >&2 || true
   echo >&2
 fi
-rm -f "$body_file"
 exit 3
