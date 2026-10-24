@@ -137,7 +137,7 @@ One slice replaced the linear state machine across Issues #20, #24, #25 and the 
 | --- | --- |
 | Implements | [product-overview.md](./product-overview.md) §7 · [work-auth-review.md](./work-auth-review.md) §9 E2E · [acl.md](./acl.md) §8 E2E |
 | Owns | `e2e/**`, cross-portal polish limited to `src/components/portal-shell.tsx`, empty states inside each portal, README "Demo" section |
-| Proof | `pnpm test:e2e` green in CI for `e2e/reject-loop.spec.ts` and `e2e/portal-guards.spec.ts`; seed cold-start path |
+| Proof | `pnpm test:e2e` / `pnpm test:precommit` green locally for the Playwright suite under `e2e/`; seed cold-start path |
 
 ## 5. Acceptance mapping (spec Verification → owning Issue)
 

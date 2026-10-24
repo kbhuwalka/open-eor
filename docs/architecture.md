@@ -169,4 +169,4 @@ Separate API service; background jobs; caching layers; CDN/object storage; obser
 2. Enum equality test ([data-model.md](./data-model.md) §8.2).
 3. Case and task service double-apply tests ([case-state-machine.md](./case-state-machine.md) §8, [tasks-and-workflow.md](./tasks-and-workflow.md) §11).
 4. `documents.ts`: path traversal (`../`) refused; unsupported MIME refused; successful write produces file + row + event; DB failure removes file.
-5. `pnpm lint && pnpm test && pnpm build` green; CI "Quality Gates" (Lint, Unit Tests, Production Build, End-to-End Tests) is the merge gate.
+5. Local verify: `pnpm lint && pnpm test:precommit && pnpm build` green (`test:precommit` is Vitest then Playwright with `CI=true`, a seeded template outside the repo, and a per-spec sqlite copy; husky pre-push runs the same script). CI "Quality Gates" merge gate is Lint + Production Build only.

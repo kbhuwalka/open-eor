@@ -74,4 +74,4 @@ The product is "done" for the demo when all of the following are provable with s
 4. `worker` cannot complete a task that is not ready, or upload an invalid List combination.
 5. An `onboarding_specialist` rejects with a reason code; the worker completes the fix task; the specialist accepts; payroll is set up once Finance confirmed the deposit.
 6. `client_hr` sees the final status and never receives document bytes (`/api/documents/*` returns `403`).
-7. The Playwright reject-loop path in [issue-map.md](./issue-map.md) (#29) is green in CI.
+7. The Playwright suite under `e2e/` (see [issue-map.md](./issue-map.md) #29) is green locally via `pnpm test:e2e` / husky pre-push.

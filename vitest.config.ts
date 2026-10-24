@@ -7,6 +7,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
+    // Full demo seed is multi-second; files that still call createDb cold need headroom.
+    testTimeout: 15_000,
+    hookTimeout: 60_000,
     include: [
       "src/**/__tests__/**/*.{test,spec}.{ts,tsx}",
       "src/**/*.{test,spec}.{ts,tsx}",

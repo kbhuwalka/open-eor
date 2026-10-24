@@ -3,7 +3,7 @@
 EOR worker-onboarding demo for Project SpaceXAI_Demo (factory Issue→PR→review).
 
 **Stack:** Next.js App Router + TypeScript + shadcn/ui + **Drizzle + SQLite** + **iron-session**  
-**Tests:** Vitest (unit/component), Playwright (e2e)  
+**Tests:** Vitest (unit/component) + Playwright (e2e) locally via husky pre-push; CI runs Lint + Production Build  
 **Package manager:** pnpm
 
 ## Specifications
@@ -41,8 +41,31 @@ Seeded personas: Client HR for each client company (Alex Harper at Acme Robotics
 | `pnpm test` | Vitest unit/component tests |
 | `pnpm test:watch` | Vitest watch mode |
 | `pnpm test:e2e` | Playwright e2e (live specs need a copy database outside the project, see [`e2e/README.md`](./e2e/README.md)) |
+| `pnpm test:precommit` | Vitest then Playwright via `scripts/test-precommit.ts` (husky pre-push) |
 | `pnpm db:push` | Push Drizzle schema to SQLite |
 | `pnpm db:seed` | Reseed demo data |
+
+## Pre-push hooks
+
+After `pnpm install`, husky installs a **pre-push** hook that runs `scripts/test-precommit.ts` (same as `pnpm test:precommit`): Vitest, then Playwright. Playwright seeds one out-of-repo template, then runs each spec from `playwright test --list` against a **copied sqlite** and its own PORT, while sharing the template `UPLOADS_ROOT` (seeded `storage_path` rows stay readable). Runs on `git push` (not every commit). Expect several minutes for unit plus longer for full e2e (one Next boot per spec file). Quality Gates on GitHub Actions only run **Lint** and **Production Build**. Policy: `scripts/precommit-env.ts`.
+
+Enable / refresh hooks:
+
+```bash
+pnpm install          # runs `prepare` → husky
+# or, if hooks were missing:
+pnpm exec husky
+```
+
+Skip when needed (documented escape hatches):
+
+| Method | Effect |
+| --- | --- |
+| `SKIP=pre-push git push …` | Skips the husky hook only (`SKIP=pre-commit`, `tests`, or `all` also work). `pnpm test:precommit` always runs the suite. |
+| `HUSKY=0 git push …` | Disables all husky hooks for that command |
+| `git push --no-verify` | Git built-in; skips all hooks |
+
+Prefer fixing failing tests over skipping. Agents and WIP pushes may use an escape hatch; say so in the PR if tests were not run.
 
 ## Project layout
 
