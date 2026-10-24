@@ -1,13 +1,8 @@
-import fs from "node:fs"
-import os from "node:os"
-import path from "node:path"
-
 import { eq } from "drizzle-orm"
-import { afterEach, describe, expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 
 import {
   clientCompanies,
-  createDb,
   hireRequests,
   onboardingCases,
   roles,
@@ -27,18 +22,9 @@ import {
   listNonEmployeePersonas,
   searchEmployees,
 } from "../personas"
+import { tempDbFactory } from "./helpers"
 
-const cleanups: string[] = []
-
-function openDb(): AppDatabase {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "personas-"))
-  cleanups.push(dir)
-  return createDb(path.join(dir, "test.sqlite"), { forceSeed: false })
-}
-
-afterEach(() => {
-  for (const dir of cleanups.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
-})
+const openDb = tempDbFactory("personas-")
 
 const NOW = new Date("2026-06-15T12:00:00Z")
 

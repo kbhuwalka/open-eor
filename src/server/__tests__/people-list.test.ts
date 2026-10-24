@@ -1,30 +1,17 @@
-import fs from "node:fs"
-import os from "node:os"
-import path from "node:path"
-
-import { afterEach, describe, expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 
 import { eq } from "drizzle-orm"
 
-import { createDb, hireRequests, onboardingCases, SEED_IDS, SEED_ROSTER, type AppDatabase } from "@/db"
+import { hireRequests, onboardingCases, SEED_IDS, SEED_ROSTER, type AppDatabase } from "@/db"
 import { personStatusFor } from "@/domain/person-status"
 import { projectTasks } from "@/domain/tasks"
 import { DEFAULT_PEOPLE_QUERY, type PeopleQuery } from "@/lib/people-query"
 
 import { listPeople } from "../queries"
 import { tasksForCases } from "../tasks"
+import { tempDbFactory } from "./helpers"
 
-const cleanups: string[] = []
-
-function openDb(): AppDatabase {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "people-list-"))
-  cleanups.push(dir)
-  return createDb(path.join(dir, "test.sqlite"), { forceSeed: false })
-}
-
-afterEach(() => {
-  for (const dir of cleanups.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
-})
+const openDb = tempDbFactory("people-list-")
 
 const q = (patch: Partial<PeopleQuery>): PeopleQuery => ({ ...DEFAULT_PEOPLE_QUERY, ...patch })
 const TOTAL = SEED_ROSTER.filter((person) => person.company === 0).length

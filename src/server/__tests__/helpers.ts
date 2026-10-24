@@ -7,7 +7,7 @@ import os from "node:os"
 import path from "node:path"
 
 import { eq } from "drizzle-orm"
-import { afterEach } from "vitest"
+import { afterAll, afterEach, beforeAll } from "vitest"
 
 import type { SessionUser } from "@/auth/session"
 import { caseDocuments, createDb, SEED_COMPANIES, SEED_IDS, users, type AppDatabase } from "@/db"
@@ -40,16 +40,46 @@ export const alex: SessionUser = {
   providerId: null,
 }
 
-/** Opens a seeded database in a temp dir; the dir is removed after each test. */
+/**
+ * Opens a seeded database in a temp dir; the dir is removed after each test.
+ * Seeds once into a template file, then copies it per open (~ms) instead of
+ * re-running the full demo seed (~seconds) on every call.
+ */
 export function tempDbFactory(prefix = "eor-svc-"): () => AppDatabase {
   const dirs: string[] = []
+  let templateFile: string | undefined
+  const ensureTemplate = () => {
+    if (templateFile) return templateFile
+    const tdir = fs.mkdtempSync(path.join(os.tmpdir(), `${prefix}template-`))
+    const tpath = path.join(tdir, "template.sqlite")
+    const template = createDb(tpath, { forceSeed: false })
+    template.$client.pragma("wal_checkpoint(TRUNCATE)")
+    template.$client.close()
+    templateFile = tpath
+    return templateFile
+  }
+  // Seed outside any per-test timeout (full demo seed is multi-second).
+  beforeAll(() => {
+    ensureTemplate()
+  }, 60_000)
   afterEach(() => {
     for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
   })
+  afterAll(() => {
+    if (!templateFile) return
+    try {
+      fs.rmSync(path.dirname(templateFile), { recursive: true, force: true })
+    } catch {
+      /* best-effort */
+    }
+  })
   return () => {
+    const template = ensureTemplate()
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
     dirs.push(dir)
-    return createDb(path.join(dir, "test.sqlite"), { forceSeed: false })
+    const dest = path.join(dir, "test.sqlite")
+    fs.copyFileSync(template, dest)
+    return createDb(dest, { forceSeed: false })
   }
 }
 

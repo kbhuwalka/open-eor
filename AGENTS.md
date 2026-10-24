@@ -27,7 +27,7 @@ Next.js (repo root), pnpm, Node 24. Unit/component tests in `__tests__/`; e2e in
 pnpm lint && pnpm test:precommit && pnpm build
 # test:precommit = Vitest then Playwright (scripts/test-precommit.ts; also husky pre-push).
 # CI Quality Gates: Lint + Production Build only.
-# Skip husky only: SKIP=pre-push|tests|all | HUSKY=0 | git push --no-verify — note skips in the PR.
+# Skip husky only: SKIP=pre-push|pre-commit|tests|all | HUSKY=0 | git push --no-verify — note skips in the PR.
 # pnpm test:precommit always runs (SKIP does not apply).
 ```
 

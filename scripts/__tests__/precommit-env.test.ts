@@ -7,6 +7,7 @@ import {
   PRECOMMIT_SKIP_TOKENS,
   buildPrecommitEnv,
   defaultPrecommitWorkDir,
+  shouldSkipHookRun,
   shouldSkipPrecommit,
 } from "../precommit-env"
 
@@ -28,6 +29,20 @@ describe("shouldSkipPrecommit", () => {
   it("does not skip for unrelated SKIP values", () => {
     expect(shouldSkipPrecommit("lint")).toBe(false)
     expect(shouldSkipPrecommit("e2e")).toBe(false)
+  })
+})
+
+describe("shouldSkipHookRun", () => {
+  it("skips only when --hook is present and SKIP matches", () => {
+    expect(shouldSkipHookRun(["--hook"], "pre-push")).toBe(true)
+    expect(shouldSkipHookRun(["--hook"], "tests")).toBe(true)
+    expect(shouldSkipHookRun(["--hook"], "pre-commit")).toBe(true)
+  })
+
+  it("never skips a bare invocation (pnpm test:precommit)", () => {
+    expect(shouldSkipHookRun([], "pre-push")).toBe(false)
+    expect(shouldSkipHookRun([], "tests")).toBe(false)
+    expect(shouldSkipHookRun(["--other"], "all")).toBe(false)
   })
 })
 

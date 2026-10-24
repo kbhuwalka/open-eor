@@ -19,6 +19,14 @@ export function shouldSkipPrecommit(skipEnv: string | undefined): boolean {
   return PRECOMMIT_SKIP_TOKENS.some((t) => tokens.has(t))
 }
 
+/** Husky passes `--hook`; only then may SKIP short-circuit. Bare `pnpm test:precommit` always runs. */
+export function shouldSkipHookRun(
+  argv: readonly string[],
+  skipEnv: string | undefined,
+): boolean {
+  return argv.includes("--hook") && shouldSkipPrecommit(skipEnv)
+}
+
 export type PrecommitEnvInput = {
   cwd: string
   /** Absolute path to a directory outside `cwd` (typically under os.tmpdir()). */

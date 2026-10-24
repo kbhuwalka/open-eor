@@ -8,7 +8,9 @@ const nextBin = path.join(process.cwd(), "node_modules", ".bin", "next")
 
 export default defineConfig({
   testDir: "./e2e",
-  fullyParallel: true,
+  fullyParallel: !process.env.CI,
+  // One shared temp DB under CI/pre-push: serialize so writers do not race seed rows.
+  workers: process.env.CI ? 1 : undefined,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   reporter: "list",
