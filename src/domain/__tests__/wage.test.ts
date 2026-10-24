@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { assertWageAllowed, resolveWageFloor } from "../wage"
+import { assertWageAllowed, minimumWageCents, resolveWageFloor } from "../wage"
 import { expectDomainError } from "./expect-domain-error"
 
 describe("assertWageAllowed", () => {
@@ -25,15 +25,39 @@ describe("assertWageAllowed", () => {
     ).not.toThrow()
   })
 
-  it("compares salary as floor(annual cents / 2080) against the federal floor in TX", () => {
+  it("compares an annual wage as floor(annual cents / 2080) against the federal floor in TX", () => {
     expect(() =>
-      assertWageAllowed({ wageCents: 1_508_000, wageUnit: "salary", stateCode: "TX" }),
+      assertWageAllowed({ wageCents: 1_508_000, wageUnit: "annual", stateCode: "TX" }),
     ).not.toThrow()
     const refused = expectDomainError(
-      () => assertWageAllowed({ wageCents: 1_507_999, wageUnit: "salary", stateCode: "TX" }),
+      () => assertWageAllowed({ wageCents: 1_507_999, wageUnit: "annual", stateCode: "TX" }),
       "WAGE_BELOW_FLOOR",
     )
     expect(refused.details).toEqual({ floorCents: 725, effectiveHourlyCents: 724 })
+  })
+
+  it("annualises a monthly wage before comparing", () => {
+    // 725 * 2080 / 12 = 125,666.67 cents a month
+    expect(() =>
+      assertWageAllowed({ wageCents: 125_667, wageUnit: "monthly", stateCode: "TX" }),
+    ).not.toThrow()
+    expectDomainError(
+      () => assertWageAllowed({ wageCents: 125_000, wageUnit: "monthly", stateCode: "TX" }),
+      "WAGE_BELOW_FLOOR",
+    )
+  })
+
+  it("scales the minimum to the pay frequency and never undershoots the guard", () => {
+    expect(minimumWageCents("CA", "hourly")).toBe(1650)
+    expect(minimumWageCents("CA", "annual")).toBe(1650 * 2080)
+    expect(minimumWageCents("TX", "monthly")).toBe(125_667)
+    for (const unit of ["hourly", "monthly", "annual"] as const) {
+      for (const state of ["TX", "CA", "WA", "IL"]) {
+        expect(() =>
+          assertWageAllowed({ wageCents: minimumWageCents(state, unit), wageUnit: unit, stateCode: state }),
+        ).not.toThrow()
+      }
+    }
   })
 
   it("refuses zero and negative wages", () => {

@@ -1,25 +1,27 @@
-import { Suspense, type ReactNode } from "react"
+import type { ReactNode } from "react"
 
-import { requirePortalUser } from "@/auth"
-import { PortalShell } from "@/components/portal-shell"
-
-async function WorkerGuard({ children }: { children: ReactNode }) {
-  const user = await requirePortalUser("worker")
-  return (
-    <PortalShell title="Worker portal" user={user}>
-      {children}
-    </PortalShell>
-  )
-}
+import { PortalLayout } from "@/components/app-shell/portal-layout"
+import { getDb } from "@/db"
+import { openTaskCount } from "@/server/task-inbox"
 
 export default function WorkerLayout({ children }: { children: ReactNode }) {
   return (
-    <Suspense
-      fallback={
-        <main className="p-8 text-sm text-muted-foreground">Loading…</main>
-      }
+    <PortalLayout
+      role="worker"
+      nav={(user) => [
+        {
+          label: "Home",
+          icon: "home",
+          href: "/worker",
+          also: ["/worker/tasks"],
+          count: openTaskCount(getDb(), user),
+        },
+        { label: "Pay", icon: "finance", href: "/worker/pay", prefix: true },
+        { label: "Benefits", icon: "benefits", href: "/worker/benefits", prefix: true },
+        { label: "Documents", icon: "documents", href: "/worker/documents", prefix: true },
+      ]}
     >
-      <WorkerGuard>{children}</WorkerGuard>
-    </Suspense>
+      {children}
+    </PortalLayout>
   )
 }

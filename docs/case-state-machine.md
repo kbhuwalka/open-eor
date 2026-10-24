@@ -1,122 +1,98 @@
-# Case state machine
+# Case lifecycle
 
 ## 1. Purpose and assumptions
 
-This spec owns the `OnboardingCase` lifecycle: the state set, every legal transition with its allowed actor, preconditions, the event it emits, and what is illegal. It is implemented as pure functions in `src/domain/case-machine.ts` and enforced on the server for every mutation ([acl.md](./acl.md) §5). UI MAY hide controls, but hiding is never the enforcement.
+This spec owns what is **stored** about an `OnboardingCase`'s standing, and how onboarding **derives** from tasks. It replaces the old ten-state machine: there is no `state` column and no transition matrix for onboarding. Which step a person is on, who is waiting on whom, whether the start is at risk and whether the person is `onboarding` or `active` are all read from the case's tasks ([tasks-and-workflow.md](./tasks-and-workflow.md)).
+
+What remains explicit is the set of client decisions that cannot be inferred from tasks: cancel, terminate, reactivate, and the fixed-term end date. They are pure functions in `src/domain/case-lifecycle.ts`, enforced on the server for every mutation ([acl.md](./acl.md) §5). UI MAY hide controls, but hiding is never the enforcement.
 
 Assumptions:
 
 - Role ids come from [acl.md](./acl.md) §2.
-- Event types and payloads come from [domain.md](./domain.md) §9; preconditions reference [domain.md](./domain.md) §3–§8.
+- Event types and payloads come from [domain.md](./domain.md) §9; term rules from [domain.md](./domain.md) §2.2.
 - Persistence columns come from [data-model.md](./data-model.md).
 
-## 2. States
+## 2. Lifecycle
 
-| State | Meaning | Who acts next |
-| --- | --- | --- |
-| `draft_hire` | Hire created, not yet submitted | `client_hr` |
-| `awaiting_agreement` | Hire submitted; client–EOR agreement not yet signed | `client_hr` |
-| `pending_eor_setup` | Agreement signed; EOR has not released the case | `eor_ops` |
-| `awaiting_worker` | Worker checklist open | `worker` |
-| `pending_review` | Submitted; in reviewer queue | `eor_reviewer` |
-| `changes_requested` | Reviewer rejected with reason; worker must fix | `worker` (or `eor_ops` reopen) |
-| `work_auth_approved` | Reviewer approved | `eor_ops` |
-| `ready_for_payroll` | Terminal for the demo | — |
+`onboarding_cases.lifecycle` is one of exactly three literals, exported as `CASE_LIFECYCLES`:
 
-Exactly these eight literals. They are stored as `onboarding_cases.state` text and exported as `CASE_STATES` from the domain types module ([architecture.md](./architecture.md) §3.1).
+| Lifecycle | Meaning |
+| --- | --- |
+| `open` | The default. The case has tasks; the person is onboarding, then active (derived) |
+| `cancelled` | The client withdrew the order before it went live. Open tasks are `cancelled` |
+| `terminated` | The client ended a live person's employment. Open tasks are `cancelled` |
 
-## 3. Rules
+Everything else a UI used to call a state is derived (§4).
 
-- S1. A case is created in `draft_hire` together with its `HireRequest` and MUST NOT be created in any other state (seed data is the only exception and MUST still be reachable by legal transitions from `draft_hire`).
-- S2. Every transition MUST be validated by `assertTransition({ from, to, actorRole })` in the domain before any write. The function throws `DomainError("ILLEGAL_TRANSITION")` for an unknown edge and `DomainError("FORBIDDEN_ROLE")` for a known edge with the wrong actor. Named operations (S3) check the actor's role before the edge, so a wrong-role call on a non-existent edge reports `FORBIDDEN_ROLE`; only `assertTransition` called directly reports `ILLEGAL_TRANSITION` first.
-- S3. Transitions are applied by named operations (§5), never by setting `state` directly. Each operation MUST: check actor role → check preconditions → compute new state → return `{ nextState, event }`. Persistence applies both atomically ([architecture.md](./architecture.md) §4).
-- S4. `ready_for_payroll` is terminal: no outgoing edges.
-- S5. Self-transitions are illegal. Skipping states is illegal.
-- S6. `eor_ops` MUST NOT be able to reach `work_auth_approved` or `changes_requested` by any operation. `eor_reviewer` MUST NOT be able to reach any state other than those two.
-- S7. Concurrency: the persistence layer MUST re-read `state` inside the transaction and apply `assertTransition` against that value, so a stale UI cannot double-apply (e.g. two approvals). The second attempt fails with `ILLEGAL_TRANSITION`.
+## 3. Operations (contracts)
 
-## 4. Transition × actor matrix
+All functions are pure and return `{ nextLifecycle, event }` (plus the reactivation extras) or throw `DomainError`. Persistence applies the result, the task changes and the event atomically ([architecture.md](./architecture.md) §4), re-reading `lifecycle` and the tasks inside the transaction, so a stale UI cannot double-apply: the second attempt fails with `ILLEGAL_TRANSITION`.
 
-Rows are `from`; columns are `to`. Cell = allowed actor role (operation id in §5). Empty = illegal for every role.
-
-| from \ to | `awaiting_agreement` | `pending_eor_setup` | `awaiting_worker` | `pending_review` | `changes_requested` | `work_auth_approved` | `ready_for_payroll` |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `draft_hire` | `client_hr` (T1a) | `client_hr` (T1b) | | | | | |
-| `awaiting_agreement` | | `client_hr` (T2) | | | | | |
-| `pending_eor_setup` | | | `eor_ops` (T3) | | | | |
-| `awaiting_worker` | | | | `worker` (T4) | | | |
-| `pending_review` | | | | | `eor_reviewer` (T5) | `eor_reviewer` (T6) | |
-| `changes_requested` | | | `eor_ops` (T7) | `worker` (T4) | | | |
-| `work_auth_approved` | | | | | | | `eor_ops` (T8) |
-| `ready_for_payroll` | | | | | | | |
-
-No edge targets `draft_hire`. Total legal edges: 10.
-
-## 5. Operations (contracts)
-
-All functions are pure, in `src/domain/case-machine.ts`, and return `TransitionResult = { nextState: CaseState; event: CaseEventDescriptor }` or throw `DomainError`.
-
-| Id | Operation | Actor | From → To | Preconditions (beyond role/state) | Event |
+| Id | Operation | Actor | From → To | Preconditions (beyond role) | Event |
 | --- | --- | --- | --- | --- | --- |
-| T1a | `submitHire` | `client_hr` | `draft_hire → awaiting_agreement` | agreement `status === "draft"`; `assertWageAllowed` passes; snapshot not yet set | `hire_submitted` |
-| T1b | `submitHire` | `client_hr` | `draft_hire → pending_eor_setup` | agreement `status === "signed"`; `assertWageAllowed` passes; snapshot not yet set | `hire_submitted` |
-| T2 | `signAgreement` | `client_hr` | `awaiting_agreement → pending_eor_setup` | agreement currently `draft` (else `AGREEMENT_ALREADY_SIGNED`); applies to **all** cases of the client in `awaiting_agreement` (zero cases is fine — the agreement still flips to `signed`) | `agreement_signed` (one per case) |
-| T3 | `opsReleaseToWorker` | `eor_ops` | `pending_eor_setup → awaiting_worker` | — | `released_to_worker` |
-| T4 | `workerSubmitForReview` | `worker` | `awaiting_worker \| changes_requested → pending_review` | in order ([domain.md](./domain.md) C2): actor is the case's `workerUserId`; `checklistStatus.complete`; `isWorkAuthListComboValid(activeKinds)` | `submitted_for_review` (`submissionNo` = previous + 1) |
-| T5 | `reviewerReject` | `eor_reviewer` | `pending_review → changes_requested` | valid `RejectReason` ([domain.md](./domain.md) W3) | `work_auth_rejected` |
-| T6 | `reviewerApprove` | `eor_reviewer` | `pending_review → work_auth_approved` | active docs satisfy W1 | `work_auth_approved` |
-| T7 | `opsReopen` | `eor_ops` | `changes_requested → awaiting_worker` | — | `case_reopened` |
-| T8 | `opsMarkReadyForPayroll` | `eor_ops` | `work_auth_approved → ready_for_payroll` | — | `ready_for_payroll` |
+| T0 | `createOrder` | `client_hr` | none → `open` | role belongs to the company; email unused; `assertWageAllowed`; at least 5 business days of notice ([domain.md](./domain.md) §2.1 H4); end date after the start; instantiates the task graph from the active template | `order_created` |
+| T9 | `clientCancelOrder` | `client_hr` | `open → cancelled` | go-live **not** reached (derived); optional `note`; case belongs to the actor's company (else not found). Open tasks become `cancelled` | `request_cancelled` |
+| T10 | `clientTerminate` | `client_hr` | `open → terminated` | go-live reached (derived); `effectiveOn` is an ISO date (else `ILLEGAL_TRANSITION`); for a fixed term `effectiveOn` MUST NOT be after the end date (`LAST_DAY_AFTER_END_DATE`; ending early is allowed, [domain.md](./domain.md) §2.2 M6). The go-live task is persisted first, so history says the person started; then open tasks become `cancelled` | `terminated` |
+| T11 | `clientReactivate` | `client_hr` | `terminated → open`; `cancelled → open` (restart); or a renewal on `open` (below) | optional `note`; case belongs to the actor's company. Never yields an ended person: when `end_date` is before today the call must carry a new term (`newEndDate`, `null` = indefinite, else after today and after the start; `TERM_REQUIRED` / `END_DATE_NOT_FUTURE` / `END_DATE_BEFORE_START`), persisted on the hire and recorded as `{ endDate }` | `reactivated` |
 
-`submitHire` additionally returns `snapshot: PolicySnapshotV1` to be persisted with the hire ([domain.md](./domain.md) §8).
+Reactivation by source:
 
-Non-transition operations that still write events: `createHire` (`hire_created`, state stays `draft_hire`; precondition [domain.md](./domain.md) H1), `uploadDocument` (`document_uploaded`), `addOpsNote` (`ops_note`). They are role-gated per [acl.md](./acl.md) §3 but do not change `state`.
+- From `terminated`: the tasks are kept as they were (they stay `cancelled`/`done`; the person had already started), so the person is `active` again. Onboarding is not repeated.
+- From `cancelled`: onboarding **restarts**. The facts are frozen again from today's state (is the master agreement signed now; the deposit still owed is the original deposit minus what the ledger holds; the term), and the template's start tasks are instantiated again with fresh `seq` after the cancelled ones. History is kept, so the timeline shows the cancellation and the restart. The template version is the case's own, not the newest.
+- Renewal (not a lifecycle change): an `open`, live person whose fixed term has ended reads as `inactive`. `clientReactivate` accepts that case and delegates to `clientRenewTerm`, which keeps `open`, updates `end_date` and writes `reactivated`; from an open person with a running or indefinite term it is `ILLEGAL_TRANSITION` ([domain.md](./domain.md) §2.2 M7–M8).
 
-## 6. Illegal transitions (must be tested)
+Non-lifecycle operations that still write events: `uploadCaseDocument` (`document_uploaded`), `addOpsNote` (`ops_note`), and every task completion, rejection or reopening (`task_completed`, `task_rejected`, `task_reopened`, [tasks-and-workflow.md](./tasks-and-workflow.md) §5). Signing the master agreement writes `agreement_signed`.
+
+## 4. How onboarding derives from tasks
+
+| Concept | Derivation |
+| --- | --- |
+| Go-live reached | the go-live trigger task is effectively `done`: every blocking task is resolved and the start date has arrived (lazy, [tasks-and-workflow.md](./tasks-and-workflow.md) §5.5) |
+| Person status | `personStatusFor({ lifecycle, goLiveReached, endDate, now })` ([domain.md](./domain.md) §9.2): `cancelled`/`terminated` → `inactive`; else `onboarding` until go-live, then `active`, or `inactive` once the term has ended |
+| Progress | blocking tasks done of total (rework counted once) |
+| Waiting on | the parties owning ready blocking tasks; the client sees You, Worker or Northwind |
+| Next step | the ready blocking task with the earliest due date |
+| At risk | open, not live, and an open blocking task is overdue or the start date has passed |
+| Waiting for start | every blocking task done and the start date still ahead |
+
+Rework replaces the old reject loop: a specialist rejecting `verify_i9_section2` spawns a `fix_documents` task for the worker and a new `verify_i9_section2` behind it ([work-auth-review.md](./work-auth-review.md)).
+
+## 5. Rules
+
+- C1. A case is created `open` together with its `HireRequest`, its frozen facts and its tasks, and MUST NOT be created in any other lifecycle.
+- C2. Lifecycle changes go only through the operations in §3, never by setting the column directly. Each checks actor role → preconditions → result, then persists atomically.
+- C3. There are no terminal lifecycles: `cancelled` and `terminated` leave through T11. A live `open` person leaves only through T10.
+- C4. Only `client_hr` can cancel, terminate or reactivate. `onboarding_specialist`, `finance` and `worker` get `FORBIDDEN_ROLE`; a client of another company gets not-found ([acl.md](./acl.md) §5).
+- C5. Cancelling after go-live, and terminating before it, are `ILLEGAL_TRANSITION`. The person's status, not a stored state, decides.
+
+## 6. Illegal operations (must be tested)
 
 | Attempt | Expected error |
 | --- | --- |
-| `eor_ops` approve from `pending_review` | `FORBIDDEN_ROLE` |
-| `eor_ops` reject from `pending_review` | `FORBIDDEN_ROLE` |
-| `eor_reviewer` release from `pending_eor_setup` | `FORBIDDEN_ROLE` |
-| `client_hr` submit for review from `awaiting_worker` | `FORBIDDEN_ROLE` |
-| `worker` approve from `pending_review` | `FORBIDDEN_ROLE` |
-| `draft_hire → awaiting_worker` by anyone | `ILLEGAL_TRANSITION` |
-| `pending_eor_setup → pending_review` by anyone | `ILLEGAL_TRANSITION` |
-| `work_auth_approved → work_auth_approved` (double approve) | `ILLEGAL_TRANSITION` |
-| `ready_for_payroll → *` | `ILLEGAL_TRANSITION` |
-| `worker` submit with `missing.length > 0` | `CHECKLIST_INCOMPLETE` |
-| `worker` submit, checklist complete, active docs `{list_a, list_b}` | `INVALID_LIST_COMBO` |
-| `client_hr` second `signAgreement` | `AGREEMENT_ALREADY_SIGNED` |
-| `client_hr` `createHire` for `user_worker` (already has `case_pending_1`) | `WORKER_ALREADY_ASSIGNED` |
-| `eor_reviewer` reject with `OTHER` and empty note | `INVALID_REJECT_REASON` |
-| `worker` submit on a case whose `workerUserId` ≠ actor | `FORBIDDEN_ROLE` |
+| `onboarding_specialist` or `finance` cancel, terminate or reactivate | `FORBIDDEN_ROLE` |
+| cancel a live person | `ILLEGAL_TRANSITION` |
+| terminate a person who has not gone live | `ILLEGAL_TRANSITION` |
+| cancel or terminate a case that is not `open` | `ILLEGAL_TRANSITION` |
+| reactivate an `open` person who is not live with an ended term | `ILLEGAL_TRANSITION` |
+| reactivate a person whose end date has passed without choosing a new term | `TERM_REQUIRED` |
+| reactivate with a new end date that is not after today | `END_DATE_NOT_FUTURE` |
+| terminate with `effectiveOn` after the end date | `LAST_DAY_AFTER_END_DATE` |
+| terminate with a malformed `effectiveOn` | `ILLEGAL_TRANSITION` |
+| create an order with an end date not after the start date | `END_DATE_BEFORE_START` |
+| complete or reject a task of a cancelled or terminated case | `CASE_NOT_OPEN` |
+| a client of another company cancels, terminates or reactivates | not found |
 
-## 7. Hire status derivation
+## 7. Out of scope
 
-`hire_requests.status` is derived from the case state and MUST be kept consistent by the persistence layer in the same transaction:
+Resuming a cancelled onboarding at the step it left (T11 restarts it instead); case reassignment between workers; SLA timers; changing a case's template version after creation.
 
-| Case state | `hire_requests.status` |
-| --- | --- |
-| `draft_hire` | `draft` |
-| `awaiting_agreement` … `work_auth_approved` | `submitted` |
-| `ready_for_payroll` | `active` |
-| (unused in demo) | `closed` |
+## 8. Verification
 
-## 8. Out of scope
+`src/domain/__tests__/case-lifecycle.test.ts` MUST prove every row of §6 and the T9–T11 preconditions, including the renewal path and `restartTasks`. `src/server/__tests__/cases.test.ts` MUST prove, against a database:
 
-Cancel/withdraw hire; case reassignment between workers; SLA timers; reviewer assignment routing (seed sets `assignedReviewerUserId`; any `eor_reviewer` may decide); parallel reviewers.
-
-## 9. Verification
-
-Vitest under `src/domain/__tests__/case-machine.test.ts` MUST prove:
-
-1. Happy path: `draft_hire → pending_eor_setup → awaiting_worker → pending_review → work_auth_approved → ready_for_payroll` with a signed agreement, asserting the emitted event type at each step.
-2. Agreement path: `draft_hire → awaiting_agreement → pending_eor_setup` via `submitHire` then `signAgreement`; `signAgreement` on an already-signed agreement is refused with `AGREEMENT_ALREADY_SIGNED`.
-3. Reject loop: `pending_review → changes_requested → pending_review → work_auth_approved`; `submissionNo` increments 1 → 2.
-4. Reopen: `changes_requested → awaiting_worker → pending_review`.
-5. Every row of §6.
-6. Matrix exhaustiveness: iterating all 8 × 8 `(from, to)` pairs × 4 roles, exactly the 10 edges in §4 (with their listed roles) pass `assertTransition`; all other combinations throw. This test is the executable form of the matrix.
-7. §7 derivation for every state.
-
-Server-side (owned by the integration Issue, see [issue-map.md](./issue-map.md)): S7 double-apply test — two sequential `reviewerApprove` calls on the same case; the second returns `ILLEGAL_TRANSITION` and exactly one `work_auth_approved` event exists.
+1. T0 creates the case, snapshot, facts and tasks; the `accept_agreement` task exists only when the master agreement is unsigned.
+2. Cancel cancels open tasks and keeps history; the person is `inactive`; completing a task afterwards fails.
+3. Terminate before go-live is refused; after go-live it persists the go-live task, cancels the rest and the person is `inactive`; reactivating restores `active` with the same tasks.
+4. Restart of a cancelled onboarding adds tasks after the cancelled ones, re-freezes the facts (a deposit already held is not asked for again) and keeps the history.
+5. Term rules: last working day, a new term on reactivation, renewal of an ended term.
+6. A client of another company, `onboarding_specialist`, `finance` and `worker` cannot cancel, terminate or reactivate.

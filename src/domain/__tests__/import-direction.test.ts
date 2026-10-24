@@ -94,7 +94,7 @@ describe("import specifier scanner", () => {
   })
 
   it("flags a multiline banned import and a relative import that leaves src/domain", () => {
-    const filePath = path.join(DOMAIN_ROOT, "case-machine.ts")
+    const filePath = path.join(DOMAIN_ROOT, "engine.ts")
     const source = `
       import {
         db,
@@ -102,32 +102,25 @@ describe("import specifier scanner", () => {
       import { page } from "../app/page"
     `
     expect(violationsFor(source, filePath)).toEqual([
-      "case-machine.ts → src/db/schema",
-      "case-machine.ts → ../app/page",
+      "engine.ts → src/db/schema",
+      "engine.ts → ../app/page",
     ])
   })
 
   it("sees the multiline specifiers in the domain sources", () => {
-    expect(collectImportSpecifiers(readFileSync(path.join(DOMAIN_ROOT, "checklist.ts"), "utf8"))).toEqual([
-      "./types",
-    ])
     expect(collectImportSpecifiers(readFileSync(path.join(DOMAIN_ROOT, "work-auth.ts"), "utf8"))).toEqual([
       "./types",
     ])
-    expect(collectImportSpecifiers(readFileSync(path.join(DOMAIN_ROOT, "case-machine.ts"), "utf8"))).toEqual([
-      "./checklist",
-      "./policy-snapshot",
+    expect(
+      collectImportSpecifiers(readFileSync(path.join(DOMAIN_ROOT, "tasks", "engine.ts"), "utf8")),
+    ).toEqual([
+      "../employment-term",
+      "../types",
+      "../work-auth",
+      "./authorization",
+      "./conditions",
+      "./template",
       "./types",
-      "./wage",
-      "./work-auth",
-    ])
-    expect(collectImportSpecifiers(readFileSync(path.join(DOMAIN_ROOT, "index.ts"), "utf8"))).toEqual([
-      "./types",
-      "./wage",
-      "./policy-snapshot",
-      "./work-auth",
-      "./checklist",
-      "./case-machine",
     ])
   })
 })

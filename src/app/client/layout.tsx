@@ -1,25 +1,26 @@
-import { Suspense, type ReactNode } from "react"
+import type { ReactNode } from "react"
 
-import { requirePortalUser } from "@/auth"
-import { PortalShell } from "@/components/portal-shell"
-
-async function ClientGuard({ children }: { children: ReactNode }) {
-  const user = await requirePortalUser("client_hr")
-  return (
-    <PortalShell title="Client portal" user={user}>
-      {children}
-    </PortalShell>
-  )
-}
+import { PortalLayout } from "@/components/app-shell/portal-layout"
+import { getDb } from "@/db"
+import { openTaskCount } from "@/server/task-inbox"
 
 export default function ClientLayout({ children }: { children: ReactNode }) {
   return (
-    <Suspense
-      fallback={
-        <main className="p-8 text-sm text-muted-foreground">Loading…</main>
-      }
+    <PortalLayout
+      role="client_hr"
+      nav={(user) => [
+        {
+          label: "People",
+          icon: "people",
+          href: "/client",
+          also: ["/client/people", "/client/tasks"],
+          count: openTaskCount(getDb(), user),
+        },
+        { label: "Finance", icon: "finance", href: "/client/finance" },
+        { label: "Cost calculator", icon: "calculator", href: "/client/calculator" },
+      ]}
     >
-      <ClientGuard>{children}</ClientGuard>
-    </Suspense>
+      {children}
+    </PortalLayout>
   )
 }

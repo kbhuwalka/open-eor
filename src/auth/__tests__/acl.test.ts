@@ -27,16 +27,16 @@ const worker = persona("user_worker", "worker", {
   clientCompanyId: "client_1",
   providerId: null,
 })
-const ops = persona("user_eor_ops", "eor_ops", {
+const specialist = persona("user_specialist_1", "onboarding_specialist", {
   clientCompanyId: null,
   providerId: "provider_1",
 })
-const reviewer = persona("user_eor_reviewer", "eor_reviewer", {
+const finance = persona("user_finance_1", "finance", {
   clientCompanyId: null,
   providerId: "provider_1",
 })
 
-const people = [client, worker, ops, reviewer]
+const people = [client, worker, specialist, finance]
 
 describe("requireRole", () => {
   it("lets each role pass for itself and rejects the other three", () => {

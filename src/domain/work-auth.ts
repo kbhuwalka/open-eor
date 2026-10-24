@@ -51,6 +51,31 @@ export function selectActiveDocuments<T extends TimestampedDocument>(
   })
 }
 
+/**
+ * The documents a case counts today. Like `selectActiveDocuments` (one per kind, the newest), but
+ * the I-9 list documents are one family: uploading List A supersedes every List B and List C
+ * document, and uploading List B or List C supersedes List A. Replayed in upload order, so
+ * B, C, then A leaves only A, and B again after that leaves only that B (the earlier C stays
+ * superseded). `w4` and `other` are never superseded by a list document.
+ */
+export function selectActiveIdentityDocuments<T extends TimestampedDocument>(documents: readonly T[]): T[] {
+  const ordered = documents.map((document, index) => ({ document, index })).sort((a, b) => a.document.createdAt - b.document.createdAt || a.index - b.index)
+  const active = new Map<DocumentKind, T>()
+  for (const { document } of ordered) {
+    if (document.kind === "list_a") {
+      active.delete("list_b")
+      active.delete("list_c")
+    } else if (document.kind === "list_b" || document.kind === "list_c") {
+      active.delete("list_a")
+    }
+    active.set(document.kind, document)
+  }
+  return DOCUMENT_KINDS.flatMap((kind) => {
+    const document = active.get(kind)
+    return document ? [document] : []
+  })
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }

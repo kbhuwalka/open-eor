@@ -3,7 +3,8 @@
  * always yield the same value. There is no mutator; a stored snapshot is write-once.
  */
 
-import { CHECKLIST_STEP_IDS, type BenefitPackage, type PolicySnapshotV1, type WageUnit } from "./types"
+import { type BenefitPackage, type PolicySnapshotV1, type WageUnit } from "./types"
+import { buildQuote } from "./quote"
 import { assertWageAllowed, resolveWageFloor } from "./wage"
 
 export type PolicySnapshotInput = {
@@ -15,6 +16,10 @@ export type PolicySnapshotInput = {
   stateCode: string
   package: BenefitPackage
   markupPct: number
+  /** Requested first day (ISO). With `endDate`, it starts the quoted term. */
+  startDate?: string | null
+  /** Fixed-term end date (ISO, inclusive); null or absent means an indefinite hire. */
+  endDate?: string | null
 }
 
 function deepFreeze<T>(value: T): T {
@@ -42,6 +47,7 @@ export function buildPolicySnapshot(input: PolicySnapshotInput, now: Date): Poli
     wageUnit: input.wageUnit,
     stateCode: input.stateCode,
   })
+  const endDate = input.endDate ?? null
   const snapshot: PolicySnapshotV1 = {
     version: 1,
     hireId: input.hireId,
@@ -59,9 +65,17 @@ export function buildPolicySnapshot(input: PolicySnapshotInput, now: Date): Poli
     eorFeeCents: eorFeeCents(input.wageCents, input.markupPct),
     benefits: {
       baselineHealth: true,
-      electives: input.package === "plus",
+      electives: input.package === "premium",
     },
-    requiredSteps: [...CHECKLIST_STEP_IDS],
+    endDate,
+    quote: buildQuote({
+      wageCents: input.wageCents,
+      wageUnit: input.wageUnit,
+      stateCode: input.stateCode,
+      package: input.package,
+      markupPct: input.markupPct,
+      ...(endDate && input.startDate ? { term: { startDate: input.startDate, endDate } } : {}),
+    }),
   }
   return deepFreeze(snapshot)
 }

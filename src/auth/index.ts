@@ -3,7 +3,7 @@
  * guards. Does not own portal features or document-byte access.
  */
 export { AuthError, portalAccess, requireRole as assertRole } from "./acl"
-export { clearPersona, pickPersona } from "./actions"
+export { clearPersona, pickEmployee, pickPersona } from "./actions"
 export { requirePortalUser, requireRole, requireUser } from "./require-user"
 export {
   getSessionPassword,

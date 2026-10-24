@@ -3,21 +3,17 @@ import { redirect } from "next/navigation"
 
 import { pickPersona } from "@/auth/actions"
 import { getSessionUser, ROLE_HOME } from "@/auth"
-import { getDb, listPersonas, type UserRole } from "@/db"
+import { EmployeesTile } from "@/components/employee-picker"
+import { PersonaTileFace } from "@/components/persona-tile"
+import { ThemeRoot } from "@/components/theme-root"
+import { getDb } from "@/db"
+import { countEmployees, listNonEmployeePersonas } from "@/server/personas"
 
-const ROLE_LABEL: Record<UserRole, string> = {
+const ROLE_LABEL = {
   client_hr: "Client HR",
-  worker: "Worker",
-  eor_ops: "EOR Ops",
-  eor_reviewer: "EOR Reviewer",
-}
-
-const AVATAR_TONE: Record<UserRole, string> = {
-  client_hr: "bg-sky-700",
-  worker: "bg-emerald-700",
-  eor_ops: "bg-amber-700",
-  eor_reviewer: "bg-rose-800",
-}
+  onboarding_specialist: "Onboarding Specialist",
+  finance: "Finance",
+} as const
 
 async function PersonaGrid() {
   const sessionUser = await getSessionUser()
@@ -25,10 +21,12 @@ async function PersonaGrid() {
     redirect(ROLE_HOME[sessionUser.role])
   }
 
-  const personas = listPersonas(getDb())
+  const db = getDb()
+  const personas = listNonEmployeePersonas(db)
+  const employeeCount = countEmployees(db)
 
   return (
-    <ul className="grid w-full max-w-5xl grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-5">
+    <ul className="flex w-full max-w-5xl flex-wrap justify-center gap-x-6 gap-y-8">
       {personas.map((persona) => {
         const initials = persona.displayName
           .split(" ")
@@ -36,62 +34,61 @@ async function PersonaGrid() {
           .join("")
           .slice(0, 2)
         return (
-          <li key={persona.id} className="flex flex-col items-center gap-3">
+          <li key={persona.id} className="flex w-36 flex-col items-center gap-3">
             <form action={pickPersona.bind(null, persona.id)} className="w-full">
               <button
                 type="submit"
-                className="group flex w-full flex-col items-center gap-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+                className="group flex w-full cursor-pointer flex-col items-center gap-3 rounded-lg outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
               >
-                <span
-                  className={`flex aspect-square w-full max-w-[9rem] items-center justify-center rounded-md text-3xl font-semibold text-white transition group-hover:scale-[1.03] group-hover:brightness-110 ${AVATAR_TONE[persona.role]}`}
-                  aria-hidden
+                <PersonaTileFace
+                  role={persona.role}
+                  title={persona.displayName}
+                  subtitle={ROLE_LABEL[persona.role]}
                 >
                   {initials}
-                </span>
-                <span className="text-center">
-                  <span className="block text-base font-medium text-zinc-100">
-                    {persona.displayName}
-                  </span>
-                  <span className="block text-sm text-zinc-400">
-                    {ROLE_LABEL[persona.role]}
-                  </span>
-                </span>
+                </PersonaTileFace>
               </button>
             </form>
           </li>
         )
       })}
+      <li className="flex w-36 flex-col items-center gap-3">
+        <EmployeesTile count={employeeCount} />
+      </li>
     </ul>
   )
 }
 
 export default function PickPage() {
   return (
-    <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden bg-zinc-950 px-6 py-16 text-zinc-50">
+    <ThemeRoot
+      force="dark"
+      className="relative items-center justify-center overflow-hidden px-6 py-16"
+    >
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_rgba(82,82,91,0.35),_transparent_55%)]"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,var(--muted),transparent_55%)]"
       />
       <div className="relative z-10 flex w-full flex-col items-center gap-10">
         <div className="text-center">
-          <p className="text-sm font-medium tracking-[0.2em] text-zinc-400 uppercase">
+          <p className="text-sm font-medium tracking-[0.2em] text-muted-foreground uppercase">
             Northwind EOR
           </p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
             Who&apos;s working today?
           </h1>
-          <p className="mt-2 max-w-md text-sm text-zinc-400">
-            Pick a persona to open that portal. No password — demo session only.
+          <p className="mt-2 max-w-md text-sm text-muted-foreground">
+            Pick a persona to open that portal, or search for an employee. No password — demo session only.
           </p>
         </div>
         <Suspense
           fallback={
-            <p className="text-sm text-zinc-400">Loading personas…</p>
+            <p className="text-sm text-muted-foreground">Loading personas…</p>
           }
         >
           <PersonaGrid />
         </Suspense>
       </div>
-    </div>
+    </ThemeRoot>
   )
 }

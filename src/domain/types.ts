@@ -29,48 +29,40 @@ export const caseId = (value: string): CaseId => brandString(value)
 export const agreementId = (value: string): AgreementId => brandString(value)
 export const documentId = (value: string): DocumentId => brandString(value)
 
-export const USER_ROLES = ["client_hr", "worker", "eor_ops", "eor_reviewer"] as const
+export const USER_ROLES = ["client_hr", "onboarding_specialist", "finance", "worker"] as const
 export type UserRole = (typeof USER_ROLES)[number]
 
-export const CASE_STATES = [
-  "draft_hire",
-  "awaiting_agreement",
-  "pending_eor_setup",
-  "awaiting_worker",
-  "pending_review",
-  "changes_requested",
-  "work_auth_approved",
-  "ready_for_payroll",
-] as const
-export type CaseState = (typeof CASE_STATES)[number]
+/**
+ * The explicit case lifecycle. Onboarding progress is not a state: it is derived from the case's
+ * tasks (tasks-and-workflow.md §8).
+ */
+export const CASE_LIFECYCLES = ["open", "cancelled", "terminated"] as const
+export type CaseLifecycle = (typeof CASE_LIFECYCLES)[number]
 
 export const AGREEMENT_STATUSES = ["draft", "signed"] as const
 export type AgreementStatus = (typeof AGREEMENT_STATUSES)[number]
 
-export const WAGE_UNITS = ["hourly", "salary"] as const
+export const WAGE_UNITS = ["hourly", "monthly", "annual"] as const
 export type WageUnit = (typeof WAGE_UNITS)[number]
 
-export const BENEFIT_PACKAGES = ["standard", "plus"] as const
+export const BENEFIT_PACKAGES = ["standard", "premium"] as const
 export type BenefitPackage = (typeof BENEFIT_PACKAGES)[number]
-
-export const HIRE_STATUSES = ["draft", "submitted", "active", "closed"] as const
-export type HireStatus = (typeof HIRE_STATUSES)[number]
 
 export const DOCUMENT_KINDS = ["list_a", "list_b", "list_c", "w4", "other"] as const
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number]
 
 export const CASE_EVENT_TYPES = [
-  "hire_created",
-  "hire_submitted",
+  "order_created",
   "agreement_signed",
-  "released_to_worker",
+  "task_completed",
+  "task_rejected",
+  "task_reopened",
   "document_uploaded",
-  "submitted_for_review",
-  "work_auth_rejected",
-  "work_auth_approved",
-  "case_reopened",
-  "ready_for_payroll",
+  "benefit_election_changed",
   "ops_note",
+  "request_cancelled",
+  "terminated",
+  "reactivated",
 ] as const
 export type CaseEventType = (typeof CASE_EVENT_TYPES)[number]
 
@@ -104,18 +96,73 @@ export type I9Attestation = {
 export const FILING_STATUSES = ["single", "married", "head_of_household"] as const
 export type FilingStatus = (typeof FILING_STATUSES)[number]
 
-export const CHECKLIST_STEP_IDS = [
-  "personal",
-  "i9",
-  "w4",
-  "bank",
-  "benefits_ack",
-] as const
-export type ChecklistStepId = (typeof CHECKLIST_STEP_IDS)[number]
-
 export type PersonalJson = { legalName: string; phone: string }
 export type W4Json = { filingStatus: FilingStatus }
 export type BankJson = { last4: string }
+
+export const QUOTE_LINE_CODES = [
+  "WAGE",
+  "SOCIAL_SECURITY",
+  "MEDICARE",
+  "FUTA",
+  "SUTA",
+  "WORKERS_COMP",
+  "SERVICE_FEE",
+  "HEALTHCARE",
+  "RETIREMENT",
+] as const
+export type QuoteLineCode = (typeof QUOTE_LINE_CODES)[number]
+
+export const QUOTE_LINE_GROUPS = ["wage", "statutory", "service_fee", "benefits"] as const
+export type QuoteLineGroup = (typeof QUOTE_LINE_GROUPS)[number]
+
+export type QuoteLine = {
+  code: QuoteLineCode
+  group: QuoteLineGroup
+  label: string
+  /** Short human-readable basis, e.g. "6.2% up to $184,500". */
+  basis: string
+  annualCents: number
+  /** `annualCents / 12`, rounded. */
+  monthlyCents: number
+}
+
+export type QuoteAmount = { annualCents: number; monthlyCents: number }
+
+export type QuoteTerm = {
+  /** First and last day of the term, ISO `YYYY-MM-DD` (the last day is inclusive). */
+  startDate: string
+  endDate: string
+  /** Wage + statutory + service fee over the whole term. */
+  committedCents: number
+  /** Committed plus healthcare and retirement over the whole term. */
+  withBenefitsCents: number
+}
+
+/**
+ * Employer cost estimate for one hire. Wage, statutory and service-fee lines make up the
+ * committed cost; benefit lines apply only if the worker enrolls.
+ */
+export type Quote = {
+  rateSetId: string
+  package: BenefitPackage
+  markupPct: number
+  lines: QuoteLine[]
+  /**
+   * Present for a fixed term. Line and total cents are then annualised rates over the term, so
+   * per-hour/month/year display still works; these are the absolute dollars for the term.
+   * Absent for an indefinite term (and on older snapshots): the figures are a full year.
+   */
+  term?: QuoteTerm
+  totals: {
+    statutory: QuoteAmount
+    /** Wage + statutory + service fee. */
+    committed: QuoteAmount
+    /** Healthcare + retirement if the worker enrolls. */
+    benefits: QuoteAmount
+    withBenefits: QuoteAmount
+  }
+}
 
 export type PolicySnapshotV1 = {
   version: 1
@@ -129,18 +176,34 @@ export type PolicySnapshotV1 = {
   markupPct: number
   eorFeeCents: number
   benefits: { baselineHealth: true; electives: boolean }
-  requiredSteps: ["personal", "i9", "w4", "bank", "benefits_ack"]
+  /** Fixed-term end date (inclusive), or null for an indefinite hire. Absent on older snapshots. */
+  endDate?: string | null
+  /** Absent on snapshots frozen before quotes existed. */
+  quote?: Quote
 }
 
 export const DOMAIN_ERROR_CODES = [
   "ILLEGAL_TRANSITION",
   "FORBIDDEN_ROLE",
   "WAGE_BELOW_FLOOR",
-  "CHECKLIST_INCOMPLETE",
   "INVALID_LIST_COMBO",
   "INVALID_REJECT_REASON",
   "AGREEMENT_ALREADY_SIGNED",
   "WORKER_ALREADY_ASSIGNED",
+  "ROLE_NAME_TAKEN",
+  "EMAIL_TAKEN",
+  "START_DATE_TOO_SOON",
+  "END_DATE_BEFORE_START",
+  "END_DATE_NOT_FUTURE",
+  "LAST_DAY_AFTER_END_DATE",
+  "TERM_REQUIRED",
+  "CASE_NOT_OPEN",
+  "TASK_NOT_FOUND",
+  "TASK_NOT_READY",
+  "TASK_NOT_REJECTABLE",
+  "INVALID_TASK_PAYLOAD",
+  "INVALID_WORKFLOW_TEMPLATE",
+  "INVALID_PAYMENT_SELECTION",
 ] as const
 export type DomainErrorCode = (typeof DOMAIN_ERROR_CODES)[number]
 
@@ -158,23 +221,59 @@ export class DomainError extends Error {
 }
 
 export type CaseEvent =
-  | { type: "hire_created"; payload: { hireId: string } }
-  | { type: "hire_submitted"; payload: { hireId: string; snapshotCapturedAt: string } }
+  | { type: "order_created"; payload: { hireId: string; snapshotCapturedAt: string } }
   | { type: "agreement_signed"; payload: { agreementId: string; markupPct: number } }
-  | { type: "released_to_worker"; payload: { note?: string } }
+  | {
+      type: "task_completed"
+      payload: {
+        taskId: string
+        key: string
+        label: string
+        party: string
+        /** The handler result: never contains sensitive data. */
+        result?: Record<string, unknown>
+      }
+    }
+  | {
+      type: "task_rejected"
+      payload: {
+        taskId: string
+        key: string
+        label: string
+        reason: RejectReason
+        spawnedTaskIds: string[]
+      }
+    }
+  | {
+      type: "task_reopened"
+      payload: {
+        /** The new instance. */
+        taskId: string
+        reopenedTaskId: string
+        key: string
+        label: string
+        note: string
+      }
+    }
   | {
       type: "document_uploaded"
-      payload: { documentId: string; kind: DocumentKind; supersededDocumentId?: string }
+      payload: { documentId: string; kind: DocumentKind; supersededDocumentId?: string; supersededDocumentIds?: string[] }
     }
-  | { type: "submitted_for_review"; payload: { submissionNo: number; documentIds: string[] } }
   | {
-      type: "work_auth_rejected"
-      payload: { submissionNo: number; reason: RejectReason; documentIds: string[] }
+      type: "benefit_election_changed"
+      payload: {
+        version: number
+        /** First day of the pay period the change applies from. */
+        effectiveFrom: string
+        payDate: string
+        previousDeferralPct: number
+        retirementDeferralPct: number
+      }
     }
-  | { type: "work_auth_approved"; payload: { submissionNo: number; documentIds: string[] } }
-  | { type: "case_reopened"; payload: { note?: string } }
-  | { type: "ready_for_payroll"; payload: Record<string, never> }
   | { type: "ops_note"; payload: { note: string } }
+  | { type: "request_cancelled"; payload: { note?: string } }
+  | { type: "terminated"; payload: { effectiveOn: string; note?: string } }
+  | { type: "reactivated"; payload: { note?: string; endDate?: string | null; restarted?: boolean } }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -199,11 +298,6 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value)
-}
-
-function sameRequiredSteps(value: unknown): value is PolicySnapshotV1["requiredSteps"] {
-  if (!Array.isArray(value) || value.length !== CHECKLIST_STEP_IDS.length) return false
-  return CHECKLIST_STEP_IDS.every((step, index) => value[index] === step)
 }
 
 export function parsePersonalJson(input: unknown): PersonalJson | null {
@@ -256,6 +350,59 @@ export function parseI9Attestation(input: unknown): I9Attestation | null {
   return attestation
 }
 
+function parseAmount(value: unknown): QuoteAmount | null {
+  if (!isRecord(value)) return null
+  if (!isFiniteNumber(value.annualCents) || !isFiniteNumber(value.monthlyCents)) return null
+  return { annualCents: value.annualCents, monthlyCents: value.monthlyCents }
+}
+
+function parseQuoteTerm(value: unknown): QuoteTerm | null {
+  if (!isRecord(value)) return null
+  if (!isNonEmptyString(value.startDate) || !isNonEmptyString(value.endDate)) return null
+  if (!isFiniteNumber(value.committedCents) || !isFiniteNumber(value.withBenefitsCents)) return null
+  return {
+    startDate: value.startDate.trim(),
+    endDate: value.endDate.trim(),
+    committedCents: value.committedCents,
+    withBenefitsCents: value.withBenefitsCents,
+  }
+}
+
+function parseQuote(value: unknown): Quote | null {
+  if (!isRecord(value)) return null
+  if (!isNonEmptyString(value.rateSetId) || !isEnumValue(BENEFIT_PACKAGES, value.package)) return null
+  if (!isFiniteNumber(value.markupPct) || !Array.isArray(value.lines) || !isRecord(value.totals)) return null
+  const lines: QuoteLine[] = []
+  for (const line of value.lines) {
+    if (!isRecord(line)) return null
+    if (!isEnumValue(QUOTE_LINE_CODES, line.code) || !isEnumValue(QUOTE_LINE_GROUPS, line.group)) return null
+    if (!isNonEmptyString(line.label) || typeof line.basis !== "string") return null
+    if (!isFiniteNumber(line.annualCents) || !isFiniteNumber(line.monthlyCents)) return null
+    lines.push({
+      code: line.code,
+      group: line.group,
+      label: line.label,
+      basis: line.basis,
+      annualCents: line.annualCents,
+      monthlyCents: line.monthlyCents,
+    })
+  }
+  const statutory = parseAmount(value.totals.statutory)
+  const committed = parseAmount(value.totals.committed)
+  const benefits = parseAmount(value.totals.benefits)
+  const withBenefits = parseAmount(value.totals.withBenefits)
+  if (!statutory || !committed || !benefits || !withBenefits) return null
+  const term = parseQuoteTerm(value.term)
+  return {
+    rateSetId: value.rateSetId,
+    package: value.package,
+    markupPct: value.markupPct,
+    lines,
+    ...(term ? { term } : {}),
+    totals: { statutory, committed, benefits, withBenefits },
+  }
+}
+
 /** Narrows `hire_requests.policy_snapshot_json`. Malformed input returns `null`. */
 export function parsePolicySnapshot(input: unknown): PolicySnapshotV1 | null {
   const parsed = readJson(input)
@@ -275,7 +422,15 @@ export function parsePolicySnapshot(input: unknown): PolicySnapshotV1 | null {
   if (!isNonEmptyString(value.wageFloor.source)) return null
   if (!isRecord(value.benefits) || value.benefits.baselineHealth !== true) return null
   if (typeof value.benefits.electives !== "boolean") return null
-  if (!sameRequiredSteps(value.requiredSteps)) return null
+  let quote: Quote | undefined
+  if (value.quote !== undefined) {
+    const parsedQuote = parseQuote(value.quote)
+    if (!parsedQuote) return null
+    quote = parsedQuote
+  }
+  let endDate: string | null | undefined
+  if (isNonEmptyString(value.endDate)) endDate = value.endDate.trim()
+  else if (value.endDate === null) endDate = null
   return {
     version: 1,
     hireId: value.hireId.trim(),
@@ -295,6 +450,7 @@ export function parsePolicySnapshot(input: unknown): PolicySnapshotV1 | null {
     markupPct: value.markupPct,
     eorFeeCents: value.eorFeeCents,
     benefits: { baselineHealth: true, electives: value.benefits.electives },
-    requiredSteps: [...CHECKLIST_STEP_IDS],
+    ...(endDate !== undefined ? { endDate } : {}),
+    ...(quote ? { quote } : {}),
   }
 }

@@ -18,34 +18,34 @@ import {
 } from "../types"
 
 type SpecEvent =
-  | "hire_created"
-  | "hire_submitted"
+  | "order_created"
   | "agreement_signed"
-  | "released_to_worker"
+  | "task_completed"
+  | "task_rejected"
+  | "task_reopened"
   | "document_uploaded"
-  | "submitted_for_review"
-  | "work_auth_rejected"
-  | "work_auth_approved"
-  | "case_reopened"
-  | "ready_for_payroll"
+  | "benefit_election_changed"
   | "ops_note"
+  | "request_cancelled"
+  | "terminated"
+  | "reactivated"
 
 type AssertEqual<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never
 
 const eventTypesMatchSpec: AssertEqual<CaseEventType, SpecEvent> = true
 
 const SPEC_EVENTS = [
-  "hire_created",
-  "hire_submitted",
+  "order_created",
   "agreement_signed",
-  "released_to_worker",
+  "task_completed",
+  "task_rejected",
+  "task_reopened",
   "document_uploaded",
-  "submitted_for_review",
-  "work_auth_rejected",
-  "work_auth_approved",
-  "case_reopened",
-  "ready_for_payroll",
+  "benefit_election_changed",
   "ops_note",
+  "request_cancelled",
+  "terminated",
+  "reactivated",
 ] as const satisfies readonly SpecEvent[]
 
 type Distinct<A, B> = [A] extends [B] ? never : true
@@ -102,5 +102,50 @@ describe("JSON parsers", () => {
     ).toEqual({ status: "citizen", attestedAt: "2026-01-15T00:00:00.000Z" })
     expect(parseI9Attestation({ attestedCitizen: true })).toBeNull()
     expect(parsePolicySnapshot({ version: 2 })).toBeNull()
+  })
+})
+
+describe("policy snapshot term fields", () => {
+  const base = {
+    version: 1,
+    hireId: "hire_1",
+    capturedAt: "2026-04-01T15:00:00.000Z",
+    roleTitle: "Engineer",
+    workerType: "w2_employee",
+    comp: { wageCents: 6500, wageUnit: "hourly", stateCode: "CA" },
+    wageFloor: { effectiveHourlyCents: 1650, source: "CA" },
+    package: "standard",
+    markupPct: 15,
+    eorFeeCents: 975,
+    benefits: { baselineHealth: true, electives: false },
+  }
+  const amount = { annualCents: 1, monthlyCents: 1 }
+  const quote = {
+    rateSetId: "us-2026",
+    package: "standard",
+    markupPct: 15,
+    lines: [],
+    totals: { statutory: amount, committed: amount, benefits: amount, withBenefits: amount },
+  }
+
+  it("reads snapshots frozen before terms existed, with no end date", () => {
+    const parsed = parsePolicySnapshot(base)
+    expect(parsed).not.toBeNull()
+    expect(parsed).not.toHaveProperty("endDate")
+    expect(parsePolicySnapshot({ ...base, quote })?.quote).not.toHaveProperty("term")
+  })
+
+  it("reads a null or ISO end date and ignores anything else", () => {
+    expect(parsePolicySnapshot({ ...base, endDate: null })?.endDate).toBeNull()
+    expect(parsePolicySnapshot({ ...base, endDate: "2026-10-31" })?.endDate).toBe("2026-10-31")
+    expect(parsePolicySnapshot({ ...base, endDate: 5 })).not.toHaveProperty("endDate")
+  })
+
+  it("reads a quote term and drops a malformed one", () => {
+    const term = { startDate: "2026-05-01", endDate: "2026-10-31", committedCents: 100, withBenefitsCents: 120 }
+    expect(parsePolicySnapshot({ ...base, quote: { ...quote, term } })?.quote?.term).toEqual(term)
+    const malformed = parsePolicySnapshot({ ...base, quote: { ...quote, term: { startDate: "2026-05-01" } } })
+    expect(malformed?.quote).not.toBeNull()
+    expect(malformed?.quote).not.toHaveProperty("term")
   })
 })

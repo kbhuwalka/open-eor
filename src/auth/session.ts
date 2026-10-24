@@ -4,6 +4,7 @@
  */
 import { getIronSession, type CookieStore, type SessionOptions } from "iron-session"
 import { cookies } from "next/headers"
+import { connection } from "next/server"
 import { eq } from "drizzle-orm"
 
 import { getDb, users, type AppDatabase, type UserRole } from "@/db"
@@ -28,8 +29,8 @@ export type SessionUser = {
 export const ROLE_HOME: Record<UserRole, string> = {
   client_hr: "/client",
   worker: "/worker",
-  eor_ops: "/ops",
-  eor_reviewer: "/review",
+  onboarding_specialist: "/onboarding",
+  finance: "/finance",
 }
 
 export function getSessionPassword(
@@ -98,7 +99,9 @@ export async function getSessionUser(deps?: {
   password?: string
   cookies?: CookieStore
 }): Promise<SessionUser | null> {
-  const store = deps?.cookies ?? (await cookies())
+  // iron-session calls Date.now() while unsealing; under Cache Components that
+  // must happen at request time, so pin the request before reading the cookie.
+  const store = deps?.cookies ?? (await requestCookies())
   const userId = await readSessionUserId({
     cookies: store,
     password: deps?.password,
@@ -108,6 +111,11 @@ export async function getSessionUser(deps?: {
     userId,
     loadUserById: (id) => loadUserById(db, id),
   })
+}
+
+async function requestCookies(): Promise<CookieStore> {
+  await connection()
+  return cookies()
 }
 
 export function homePathForSession(user: SessionUser | null): string {

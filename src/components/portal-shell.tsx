@@ -1,28 +1,40 @@
+import type { ReactNode } from "react"
+
 import type { SessionUser } from "@/auth"
+import { SidebarNav, type NavItem } from "@/components/app-shell/sidebar-nav"
+import { SidebarShell } from "@/components/app-shell/sidebar-shell"
+import { NorthwindLogo } from "@/components/northwind-logo"
 import { PersonaSwitcher } from "@/components/persona-switcher"
 
-type PortalShellProps = {
-  title: string
-  user: SessionUser
-  children?: React.ReactNode
-}
+export type { NavItem }
 
-/** Minimal portal chrome shared by role shells (not a design pass). */
-export function PortalShell({ title, user, children }: PortalShellProps) {
+/**
+ * Portal chrome for all four roles: sidebar (logo and name, nav, persona block). Pages render their
+ * own PageHeader; there is no top bar on desktop.
+ */
+export function PortalShell({
+  user,
+  nav,
+  children,
+}: {
+  user: SessionUser
+  nav: NavItem[]
+  children?: ReactNode
+}) {
+  const sidebar = (
+    <>
+      <div className="flex h-16 items-center gap-2.5 px-5">
+        <NorthwindLogo />
+        <span className="text-base font-semibold tracking-tight">Northwind</span>
+      </div>
+      <SidebarNav items={nav} />
+      <PersonaSwitcher user={user} />
+    </>
+  )
+
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-10">
-      <header className="flex items-start justify-between gap-4 border-b border-border pb-4">
-        <div>
-          <p className="text-sm text-muted-foreground">Northwind EOR</p>
-          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Signed in as {user.displayName}{" "}
-            <span className="font-mono text-xs">({user.role})</span>
-          </p>
-        </div>
-        <PersonaSwitcher />
-      </header>
+    <SidebarShell sidebar={sidebar}>
       {children}
-    </div>
+    </SidebarShell>
   )
 }

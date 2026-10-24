@@ -28,7 +28,7 @@ pnpm dev
 
 Open [http://localhost:3000](http://localhost:3000). With no session it redirects to `/pick`. Choosing a persona sets an **iron-session** signed httpOnly cookie named `eor_session` that carries `userId` only (override the signing secret with `SESSION_SECRET`, at least 32 characters). Switch persona clears the cookie.
 
-Seeded personas: Client HR (Alex Harper), Worker (Jordan Lee, owns `case_pending_1`), Worker (Taylor Kim, no case), EOR Ops, EOR Reviewer. `hire_1` is `submitted` with a policy snapshot. The case is in `pending_review` with a List A fixture at `data/uploads/seed/list-a-passport.png`.
+Seeded personas: Client HR (Alex Harper), Worker (Jordan Lee, owns `case_pending_1`), Worker (Taylor Kim, no case), two Onboarding Specialists (Sam Ortiz, Riley Chen), two Finance users (Morgan Reyes, Dana Whitfield). Around 47 people are produced by running the real order and task operations with seeded fake data (see [docs/data-model.md](docs/data-model.md) §5): just ordered, mid-onboarding, at risk, in rework, waiting for start, active, fixed term, cancelled and terminated. Jordan's case is waiting on the specialist's `verify_i9_section2` task, with a generated List A specimen stored through the real upload service under the uploads root. Every seeded identity document is a real file there, and `pnpm db:seed` recreates them.
 
 ## Scripts
 
@@ -40,7 +40,7 @@ Seeded personas: Client HR (Alex Harper), Worker (Jordan Lee, owns `case_pending
 | `pnpm lint` | ESLint |
 | `pnpm test` | Vitest unit/component tests |
 | `pnpm test:watch` | Vitest watch mode |
-| `pnpm test:e2e` | Playwright e2e |
+| `pnpm test:e2e` | Playwright e2e (live specs need a copy database outside the project, see [`e2e/README.md`](./e2e/README.md)) |
 | `pnpm db:push` | Push Drizzle schema to SQLite |
 | `pnpm db:seed` | Reseed demo data |
 
@@ -50,8 +50,8 @@ Seeded personas: Client HR (Alex Harper), Worker (Jordan Lee, owns `case_pending
 - [`src/domain`](./src/domain) — pure case state machine, wage safeguards, policy snapshot, work-authorization lists, and worker checklist (no I/O). Specs: [`docs/domain.md`](./docs/domain.md), [`docs/case-state-machine.md`](./docs/case-state-machine.md). `types.ts` holds the enum constants and JSON parsers.
 - `src/auth/` — iron-session, `requireUser` / `requireRole` / `requirePortalUser`
 - `src/app/pick` — persona picker
-- `src/app/{client,worker,ops,review}` — role shells; each `layout.tsx` calls `requirePortalUser`
-- `data/uploads/seed/` — committed upload fixtures (other uploads are gitignored)
+- `src/app/{client,worker,onboarding,finance}` — role shells; each `layout.tsx` calls `requirePortalUser`
+- `data/uploads/` — uploads, including the seed's generated specimen documents (gitignored); `data/uploads/seed/list-a-passport.png` is a legacy fixture kept for databases seeded before the seed stored its own files
 
 ## Deploy
 
