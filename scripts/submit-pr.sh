@@ -28,7 +28,7 @@ if ! command -v gh >/dev/null 2>&1; then
     export PATH="/Users/kunal/.local/bin:$PATH"
   else
     echo "error: gh CLI not found on PATH" >&2
-    exit 1
+    exit 4
   fi
 fi
 
@@ -68,8 +68,9 @@ DESCRIPTION
     Lint, Unit Tests, Production Build, End-to-End Tests
 
   There is no label-gated CI. Pushing/updating a PR triggers Quality Gates.
-  If the Actions API returns 403, the script exits 1 and reports that the
-  token cannot read Actions. That failure is not pending CI.
+  If the Actions API returns 403, the script exits 4 (gave up) and reports
+  that the token cannot read Actions. That failure is not pending CI /
+  exit 1.
 
 OPTIONS
   --pr <number>        PR number to submit (required)

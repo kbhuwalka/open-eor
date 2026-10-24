@@ -38,6 +38,7 @@ pnpm lint && pnpm test && pnpm build
 ```bash
 bash scripts/issue.sh <n> [--verify-unblocked|…]
 bash scripts/submit-pr.sh --pr <n>   # engineer, after Automation approve: CI → squash-merge
+bash scripts/factory-slack.sh --message "…"   # Cursor-bot Slack via Automation webhook (env secrets)
 # manual one-off only:
 bash scripts/submit-review.sh --pr <n> --verdict APPROVED|CHANGES_REQUESTED …
 ```
