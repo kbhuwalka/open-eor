@@ -9,13 +9,16 @@
 # does not read statusCheckRollup or the Checks API. A 403 from the Actions
 # API is fatal: the token cannot read Actions, and that is not pending CI.
 #
-# The merge gate is (1) an approving GitHub pull-request review and (2) those
-# CI checks (and a clean merge). The engineer must only run this after the
-# Cursor Automation (`cursor[bot]`) — or another reviewer — has formally
-# approved. CI green alone is not review passed. A first-line comment
-# verdict (APPROVED / CHANGES_REQUESTED) is not required. GH_TOKEN is the
-# PR author and cannot self-approve; another account (typically cursor[bot])
-# must leave the APPROVED review.
+# The merge gate is (1) a formal approving GitHub review on the current head
+# SHA and (2) those CI checks (and a clean merge). Anyone's APPROVED review
+# counts (typically the Cursor Automation, login `cursor`). CI green alone
+# is not review passed. A first-line comment verdict is not required.
+# GH_TOKEN is the PR author and cannot self-approve.
+#
+# Review predicate (scripts/lib/approving-review.mjs): among APPROVED /
+# CHANGES_REQUESTED reviews whose commit.oid equals the head about to merge,
+# the latest must be APPROVED. Checked at start and again immediately before
+# merge (re-fetch; refuse if head moved).
 
 set -euo pipefail
 
@@ -46,10 +49,9 @@ USAGE
 
 DESCRIPTION
   1. Checks the PR for merge conflicts (exits 2 if conflicting).
-  2. Requires a formal GitHub approving review (latest among APPROVED /
-     CHANGES_REQUESTED must be APPROVED). Does not poll for review —
-     one-shot check. Run only after Automation (or another reviewer)
-     has approved.
+  2. Requires a formal GitHub approving review on the current head SHA
+     (latest APPROVED/CHANGES_REQUESTED whose commit.oid equals head must
+     be APPROVED). Checked again immediately before merge. Does not poll.
   3. Decides the four required jobs from the Quality Gates Actions workflow
      run for the PR head SHA (`gh run list` / `gh run view`). It does not
      read statusCheckRollup or the Checks API.
@@ -163,13 +165,54 @@ print_progress() {
     "$PR" "$(fmt_time "$elapsed")" "$(fmt_time "$TIMEOUT")" "$symbols"
 }
 
+# Require approving review on headSha. Sets REVIEW_AUTHOR on success.
+# stdin unused — takes reviews JSON string as $1 and head as $2.
+require_approving_review() {
+  local reviews_json=$1
+  local head_sha=$2
+  local out status=0
+  out=$(
+    printf '%s\n' "$reviews_json" \
+      | node "$(dirname "${BASH_SOURCE[0]}")/lib/approving-review.mjs" --head "$head_sha"
+  ) || status=$?
+  local state author
+  state=$(printf '%s\n' "$out" | cut -f1)
+  author=$(printf '%s\n' "$out" | cut -f2)
+  if [[ $status -ne 0 || "$state" != "APPROVED" ]]; then
+    echo "✗ PR #${PR} — no approving GitHub review on head ${head_sha:0:7}" >&2
+    echo "  Latest decisive review on this head: ${state}${author:+ (from ${author})}" >&2
+    echo "  Wait for Automation (or another reviewer) to formally approve this commit," >&2
+    echo "  then re-run. CI green alone is not review passed. Stale-SHA approvals do not count." >&2
+    exit 1
+  fi
+  REVIEW_AUTHOR="$author"
+}
+
 do_merge() {
+  echo "PR #${PR} — re-checking head and approving review before merge..."
+  local merge_json
+  if ! merge_json=$(gh pr view "$PR" --json headRefOid,reviews 2>&1); then
+    echo "✗ PR #${PR} — could not re-fetch PR before merge" >&2
+    echo "  ${merge_json}" >&2
+    exit 1
+  fi
+  local live_head
+  live_head=$(echo "$merge_json" | jq -r '.headRefOid')
+  if [[ "$live_head" != "$HEAD_SHA" ]]; then
+    echo "✗ PR #${PR} — head moved during CI watch (${HEAD_SHA:0:7} → ${live_head:0:7})" >&2
+    echo "  Re-run submit-pr after Automation approves the new head." >&2
+    exit 1
+  fi
+  local reviews_json
+  reviews_json=$(echo "$merge_json" | jq -c '{reviews: .reviews}')
+  require_approving_review "$reviews_json" "$live_head"
+
   echo "PR #${PR} — merging..."
   local output
   if ! output=$(gh pr merge "$PR" --squash 2>&1); then
     echo "✗ PR #${PR} — merge failed" >&2
     echo "  ${output}" >&2
-    echo "  Required: an approving GitHub review and green Quality Gates checks." >&2
+    echo "  Required: an approving GitHub review on the head SHA and green Quality Gates." >&2
     exit 1
   fi
   echo "✓ PR #${PR} — merged"
@@ -403,34 +446,10 @@ if [[ "$MERGEABLE" == "CONFLICTING" ]]; then
   exit 2
 fi
 
-# Latest among APPROVED / CHANGES_REQUESTED must be APPROVED (anyone, e.g. cursor[bot]).
-LATEST_REVIEW_STATE=$(echo "$pr_json" | jq -r '
-  [
-    .reviews[]
-    | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED")
-  ]
-  | sort_by(.submittedAt)
-  | last
-  | .state // "NONE"
-')
-LATEST_REVIEW_AUTHOR=$(echo "$pr_json" | jq -r '
-  [
-    .reviews[]
-    | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED")
-  ]
-  | sort_by(.submittedAt)
-  | last
-  | .author.login // ""
-')
-
-if [[ "$LATEST_REVIEW_STATE" != "APPROVED" ]]; then
-  echo "✗ PR #${PR} — no approving GitHub review" >&2
-  echo "  Latest review state: ${LATEST_REVIEW_STATE}${LATEST_REVIEW_AUTHOR:+ (from ${LATEST_REVIEW_AUTHOR})}" >&2
-  echo "  Wait for the Cursor Automation (or another reviewer) to formally approve," >&2
-  echo "  then re-run. CI green alone is not review passed." >&2
-  exit 1
-fi
-echo "PR #${PR} — approving review from ${LATEST_REVIEW_AUTHOR:-unknown}"
+REVIEW_AUTHOR=""
+reviews_for_gate=$(echo "$pr_json" | jq -c '{reviews: .reviews}')
+require_approving_review "$reviews_for_gate" "$HEAD_SHA"
+echo "PR #${PR} — approving review on ${HEAD_SHA:0:7} from ${REVIEW_AUTHOR:-unknown}"
 
 # ---------------------------------------------------------------------------
 # Step 2: Already green?

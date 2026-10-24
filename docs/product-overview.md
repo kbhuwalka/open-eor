@@ -15,7 +15,7 @@ This document fixes *what* is being built and *how deep*. Behavior is specified 
 | Authentication | Persona picker, no passwords. Signed session cookie. Real ACL on the server. |
 | Personas | `client_hr`, `worker`, `onboarding_specialist`, `finance` (names owned by [acl.md](./acl.md)) |
 | Hosting | Local SQLite file + local disk uploads. No external services. |
-| Factory | Each Issue is owned end-to-end by one engineer agent; one Issue → one PR; Cursor Automation (`cursor[bot]`) gates merge with a formal GitHub review. |
+| Factory | Each Issue is owned end-to-end by one engineer agent; one Issue → one PR; a formal GitHub approving review (typically Cursor Automation) gates merge via `submit-pr.sh`. |
 
 ## 3. Personas
 

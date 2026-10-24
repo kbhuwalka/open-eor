@@ -8,7 +8,7 @@ GitHub **Issues and PRs** are the source of truth.
 | --- | --- | --- |
 | **EM** | This Project chat | Backlog and dispatch. The owning engineer merges. No product code. |
 | **Engineer** | Cloud worker | Issue end-to-end through merge: plan → implement → PR → subscribe for Automation review (end turn) → `submit-pr.sh` |
-| **Reviewer** | Cursor Automation (`cursor[bot]`) | Formal GitHub approve / request-changes on PR open and push (not a spawned worker; not Bugbot) |
+| **Reviewer** | Cursor Automation (GitHub login often `cursor`) | Formal GitHub approve / request-changes on PR open and push (not a spawned worker; not Bugbot). Any account’s APPROVED review on the head SHA satisfies `submit-pr.sh`. |
 
 Cursor already gives cloud workers a working branch from `main` — stay on it. PR base is `main`.
 
@@ -42,7 +42,7 @@ bash scripts/submit-pr.sh --pr <n>   # engineer, after Automation approve: CI �
 bash scripts/submit-review.sh --pr <n> --verdict APPROVED|CHANGES_REQUESTED …
 ```
 
-One Issue → one PR. `Closes #<n>`. CI always-on (no label gate). CI green ≠ review passed — the Automation owns review. After each **push** that awaits review/CI, engineers **subscribe** (`subscribe_github_pr` + `subscribe_github_ci` + once `subscribe_timer` 900s stuck alert, clock restarted on that push) and end the turn; they do not spawn a reviewer or busy-poll. If still stuck at 15m, notify Kunal (Slack if available, else agent/EM message) — Slack is not a merge gate.
+One Issue → one PR. `Closes #<n>`. CI always-on (no label gate). CI green ≠ review passed. After each **push**, engineers subscribe (PR + CI + once 900s stuck timer; reset timer via list → unsubscribe by id → re-subscribe) and end the turn. Stuck-alert / wake rules live only in `implement-issue`.
 
 <!-- BEGIN:nextjs-agent-rules -->
 
