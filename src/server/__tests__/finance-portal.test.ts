@@ -23,13 +23,8 @@ import {
   receivables,
   AGEING_BUCKETS,
 } from "../billing-queries"
-import {
-  financeInvoicePdfInput,
-  financeOverview,
-  listCompanyOptions,
-  listPendingDeposits,
-  paymentStatusCounts,
-} from "../finance-portal-queries"
+import { clientAgeing } from "../finance-insights"
+import { financeInvoicePdfInput, financeOverview, listCompanyOptions, overviewFrom, paymentStatusCounts } from "../finance-portal-queries"
 import { tasksForCase } from "../tasks"
 
 import { alex, makeClock, makeDeps, sessionUser, setup, tempDbFactory } from "./helpers"
@@ -43,6 +38,11 @@ const seededDeps = (db: AppDatabase) => makeDeps(db, makeClock(SEED_NOW.toISOStr
 const invoiceRow = (db: AppDatabase, id: string) => db.select().from(invoices).where(eq(invoices.id, id)).get()
 const paymentRow = (db: AppDatabase, id: string) => db.select().from(payments).where(eq(payments.id, id)).get()
 const invoiceCount = (db: AppDatabase) => db.select({ n: sql<number>`count(*)` }).from(invoices).get()?.n ?? 0
+/** The client's initiated payment covering the hire's deposit: the deposit's row in To settle. */
+const depositPayment = (db: AppDatabase, hireId: string) =>
+  listFinancePayments(db, finance(db), { status: "initiated", pageSize: 500 }).rows.find((row) =>
+    row.invoices.some((invoice) => invoice.id === `deposit:${hireId}`),
+  )
 const taskStatus = (db: AppDatabase, caseId: string, key: string) =>
   tasksForCase(db, caseId)
     .filter((task) => task.key === key)
@@ -105,16 +105,16 @@ describe("deposits", () => {
     const actor = finance(db)
     ctx.driver.complete("pay_deposit")
 
-    const pending = listPendingDeposits(db, actor, ctx.clock.now).find((deposit) => deposit.caseId === ctx.caseId)
-    expect(pending).toMatchObject({ state: "processing", taskKey: "confirm_deposit", overdue: false })
-    expect(pending?.paymentId).toBeTruthy()
+    const pending = depositPayment(db, ctx.hireId)
+    expect(pending).toBeDefined()
+    expect(depositState(db, ctx.hireId).state).toBe("processing")
     expect(taskStatus(db, ctx.caseId, "confirm_deposit")).toEqual(["ready"])
 
-    settlePayment(ctx.deps, { actor, paymentId: pending!.paymentId! })
+    settlePayment(ctx.deps, { actor, paymentId: pending!.id })
 
     expect(taskStatus(db, ctx.caseId, "confirm_deposit")).toEqual(["done"])
     expect(depositState(db, ctx.hireId).state).toBe("paid")
-    expect(listPendingDeposits(db, actor, ctx.clock.now).some((deposit) => deposit.caseId === ctx.caseId)).toBe(false)
+    expect(depositPayment(db, ctx.hireId)).toBeUndefined()
 
     // Nothing waits on the deposit any more: the remaining blocking tasks can all be completed.
     ctx.driver.drive({ blockingOnly: true })
@@ -126,28 +126,25 @@ describe("deposits", () => {
     expect(onboarding?.lifecycle).toBe("open")
   })
 
-  it("lists an unpaid deposit as open and a paid one as processing, processing first", () => {
+  it("an unpaid deposit is an open invoice with nothing to settle; a paid one is a payment in To settle", () => {
     const db = openDb()
     const unpaid = setup(db, { email: "a@worker.example" })
     const paid = setup(db, { email: "b@worker.example" })
     paid.driver.complete("pay_deposit")
-    const rows = listPendingDeposits(db, finance(db), unpaid.clock.now).filter((row) =>
-      [unpaid.caseId, paid.caseId].includes(row.caseId),
-    )
-    expect(rows.map((row) => [row.caseId, row.state])).toEqual([
-      [paid.caseId, "processing"],
-      [unpaid.caseId, "open"],
-    ])
-    expect(rows[1]).toMatchObject({ taskKey: "pay_deposit", paymentId: null })
+    expect(depositState(db, unpaid.hireId).state).toBe("open")
+    expect(depositPayment(db, unpaid.hireId)).toBeUndefined()
+    expect(taskStatus(db, unpaid.caseId, "pay_deposit")).toEqual(["ready"])
+    expect(depositState(db, paid.hireId).state).toBe("processing")
+    expect(depositPayment(db, paid.hireId)?.status).toBe("initiated")
   })
 
-  it("confirm received settles the deposit; the order leaves the list", () => {
+  it("confirm received settles the deposit, with no payment left to settle", () => {
     const db = openDb()
     const ctx = setup(db)
     const actor = finance(db)
     markDepositReceived(ctx.deps, { actor, caseId: ctx.caseId })
     expect(depositState(db, ctx.hireId).state).toBe("paid")
-    expect(listPendingDeposits(db, actor, ctx.clock.now).some((row) => row.caseId === ctx.caseId)).toBe(false)
+    expect(depositPayment(db, ctx.hireId)).toBeUndefined()
   })
 
   describe("an order cancelled while its deposit payment was processing", () => {
@@ -163,12 +160,11 @@ describe("deposits", () => {
       return { db, ctx, actor, payment: payment! }
     }
 
-    it("stays in Payments, and is not on the Deposits list", () => {
-      const { db, ctx, actor, payment } = cancelledWithProcessingDeposit()
+    it("stays in Payments, with its Confirm deposit task cancelled", () => {
+      const { db, ctx, payment } = cancelledWithProcessingDeposit()
       expect(payment).toBeDefined()
       expect(depositState(db, ctx.hireId).state).toBe("processing")
       expect(taskStatus(db, ctx.caseId, "confirm_deposit")).toEqual(["cancelled"])
-      expect(listPendingDeposits(db, actor, ctx.clock.now).some((row) => row.caseId === ctx.caseId)).toBe(false)
     })
 
     it("Finance can settle it from Payments", () => {
@@ -190,8 +186,8 @@ describe("deposits", () => {
   it("flags an unpaid deposit past its due date as overdue", () => {
     const db = openDb()
     const ctx = setup(db)
-    const [row] = listPendingDeposits(db, finance(db), new Date("2026-06-01T12:00:00Z")).filter((r) => r.caseId === ctx.caseId)
-    expect(row).toMatchObject({ state: "open", overdue: true })
+    const detail = invoiceDetail(db, finance(db), `deposit:${ctx.hireId}`, new Date("2026-06-01T12:00:00Z"))
+    expect(detail?.displayStatus).toBe("overdue")
   })
 })
 
@@ -313,29 +309,54 @@ describe("billing run and its preview", () => {
 })
 
 describe("receivables and the overview", () => {
-  it("the overview tiles agree with the queries behind the pages", () => {
+  it("the Home tiles agree with the Payments, Receivables and Billing run pages", () => {
     const db = openDb()
     const actor = finance(db)
     const overview = financeOverview(db, actor, SEED_NOW)
     const initiated = listFinancePayments(db, actor, { status: "initiated", pageSize: 500 }).rows
-    expect(overview.paymentsToReconcile).toEqual({ count: initiated.length, cents: initiated.reduce((n, p) => n + p.totalCents, 0) })
-    const deposits = listPendingDeposits(db, actor, SEED_NOW)
-    expect(overview.depositsAwaiting).toEqual({ count: deposits.length, cents: deposits.reduce((n, d) => n + d.amountCents, 0) })
+    expect(overview.toSettle.count).toBe(paymentStatusCounts(db, actor).initiated)
+    expect(overview.toSettle).toMatchObject({ count: initiated.length, cents: initiated.reduce((n, p) => n + p.totalCents, 0) })
+    expect(overview.toSettle.oldestInitiatedAt).toBe([...initiated.map((p) => p.initiatedAt)].sort()[0])
     const owed = receivables(db, actor, SEED_NOW)
     const late = AGEING_BUCKETS.filter((bucket) => bucket !== "current")
-    expect(overview.overdueReceivables.cents).toBe(late.reduce((n, bucket) => n + owed.buckets[bucket].cents, 0))
-    expect(overview.billing.nextIssueDate).toBeTruthy()
+    expect(overview.overdue.cents).toBe(late.reduce((n, bucket) => n + owed.buckets[bucket].cents, 0))
+    expect(overview.overdue.count).toBe(late.reduce((n, bucket) => n + owed.buckets[bucket].count, 0))
+    expect(overview.overdue.oldestDays).toBe(clientAgeing(db, actor, SEED_NOW).bookAgeing.oldestOverdueDays)
+    const preview = previewBillingRun(db, actor, SEED_NOW)
+    expect(overview.readyToBill).toEqual({
+      count: preview.wouldIssue.count,
+      cents: preview.wouldIssue.totalCents,
+      nextIssueDate: preview.upcoming[0].issueDate,
+    })
+    expect(financeOverview(db, actor, SEED_NOW, { book: clientAgeing(db, actor, SEED_NOW).bookAgeing, preview })).toEqual(overview)
   })
 
-  it("settling a payment lowers the reconcile tile by that payment", () => {
+  it("settling a payment lowers To settle by that payment", () => {
     const db = openDb()
     const actor = finance(db)
     const before = financeOverview(db, actor, SEED_NOW)
     const [payment] = listFinancePayments(db, actor, { status: "initiated" }).rows
     settlePayment(seededDeps(db), { actor, paymentId: payment.id })
     const after = financeOverview(db, actor, SEED_NOW)
-    expect(after.paymentsToReconcile.count).toBe(before.paymentsToReconcile.count - 1)
-    expect(after.paymentsToReconcile.cents).toBe(before.paymentsToReconcile.cents - payment.totalCents)
+    expect(after.toSettle.count).toBe(before.toSettle.count - 1)
+    expect(after.toSettle.cents).toBe(before.toSettle.cents - payment.totalCents)
+  })
+
+  it("overviewFrom reshapes its inputs, with no next issue date when nothing is scheduled", () => {
+    const preview = { wouldIssue: { count: 0, totalCents: 0 }, upcoming: [] } as unknown as Parameters<typeof overviewFrom>[0]["preview"]
+    expect(
+      overviewFrom({
+        today: "2026-10-24",
+        initiated: { count: 2, cents: 500, oldestInitiatedAt: "2026-10-20T14:00:00.000Z" },
+        book: { overdueCents: 900, overdueCount: 3, oldestOverdueDays: 17 },
+        preview,
+      }),
+    ).toEqual({
+      today: "2026-10-24",
+      toSettle: { count: 2, cents: 500, oldestInitiatedAt: "2026-10-20T14:00:00.000Z" },
+      overdue: { count: 3, cents: 900, oldestDays: 17 },
+      readyToBill: { count: 0, cents: 0, nextIssueDate: null },
+    })
   })
 })
 
@@ -368,7 +389,6 @@ describe("ACL: only Finance", () => {
     const db = openDb()
     const actor = who(db)
     const attempts = [
-      () => listPendingDeposits(db, actor),
       () => financeOverview(db, actor),
       () => previewBillingRun(db, actor),
       () => listCompanyOptions(db, actor),

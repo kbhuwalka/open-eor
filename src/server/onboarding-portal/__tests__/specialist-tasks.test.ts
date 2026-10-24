@@ -4,6 +4,7 @@ import os from "node:os"
 import path from "node:path"
 
 import { and, eq } from "drizzle-orm"
+import { PDFDocument } from "pdf-lib"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -15,7 +16,7 @@ import {
   generatedDocuments,
   type AppDatabase,
 } from "@/db"
-import type { I9Section2Data } from "@/domain/forms"
+import { toI9Document } from "@/domain/forms"
 import { uploadCaseDocument } from "@/server/cases"
 import { decryptFields } from "@/server/field-crypto"
 import { loadEmployeeScreen } from "@/server/employee-portal"
@@ -23,8 +24,9 @@ import { completeTaskAsActor, rejectTaskAsActor, tasksForCase } from "@/server/t
 import { readSignedFile } from "@/server/uploads"
 import { verifySignedDocument } from "@/server/documents"
 
-import { sessionUser, setup, tempDbFactory } from "@/server/__tests__/helpers"
+import { SAMPLE_IDENTITY_DETAILS, sessionUser, setup, tempDbFactory } from "@/server/__tests__/helpers"
 
+import { loadDrawerTask } from "../drawer"
 import { loadFiling } from "../filings"
 import { readStaffDocument } from "../generated-documents"
 import { acceptSection2, handlerPayload, I9InputError, loadI9Review, prepareSection2 } from "../i9-review"
@@ -51,26 +53,8 @@ afterEach(() => {
   fs.rmSync(uploadsDir, { recursive: true, force: true })
 })
 
-const PASSPORT = { title: "U.S. Passport", issuingAuthority: "U.S. Department of State", number: "123456789", expiresOn: "2031-05-01" }
-const LICENSE = { title: "Driver's license", issuingAuthority: "State of California", number: "D1234567", expiresOn: "2030-01-01" }
-const SSN_CARD = { title: "Social Security card", issuingAuthority: "Social Security Administration", number: "", expiresOn: "" }
-
-function section2(patch: Partial<I9Section2Data> = {}): I9Section2Data {
-  return {
-    listA: [PASSPORT],
-    listB: null,
-    listC: null,
-    additionalInformation: "",
-    alternativeProcedure: false,
-    firstDayOfEmployment: "2026-03-02",
-    employerRepFirstName: "Sam",
-    employerRepLastName: "Ortiz",
-    employerRepTitle: "Onboarding Specialist",
-    businessName: "Northwind EOR, Inc.",
-    businessAddress: { street: "500 Harbor Way, Suite 400", city: "San Francisco", state: "CA", zip: "94105" },
-    ...patch,
-  }
-}
+const PASSPORT = SAMPLE_IDENTITY_DETAILS.list_a
+const SECTION2_PASSPORT = { listA: [toI9Document(PASSPORT)], listB: null, listC: null }
 
 const dialog = (fieldId: string, typedName: string, now: Date) => ({
   signature: { typedName, consentedAt: new Date(now.getTime() - 60_000).toISOString() },
@@ -113,7 +97,7 @@ describe("who can use the specialist task screens", () => {
   it("the client, the employee and Finance cannot do specialist tasks", () => {
     const db = openDb()
     const ctx = atVerify(db)
-    const body = { ...section2() }
+    const body = SECTION2_PASSPORT
     for (const userId of [SEED_IDS.users.clientHr, SEED_IDS.users.finance, ctx.workerUserId]) {
       const user = sessionUser(db, userId)
       expect(() => completeTaskAsActor(ctx.deps, { actor: user, taskId: ctx.taskId, payload: handlerPayload(body) })).toThrow(
@@ -126,9 +110,9 @@ describe("who can use the specialist task screens", () => {
     return Promise.all(
       [SEED_IDS.users.clientHr, SEED_IDS.users.finance, ctx.workerUserId].map(async (userId) => {
         const user = sessionUser(db, userId)
-        await expect(prepareSection2(ctx.deps, user, { taskId: ctx.taskId, data: body })).rejects.toMatchObject({ code: "FORBIDDEN_ROLE" })
+        await expect(prepareSection2(ctx.deps, user, { taskId: ctx.taskId })).rejects.toMatchObject({ code: "FORBIDDEN_ROLE" })
         await expect(
-          acceptSection2(ctx.deps, user, { taskId: ctx.taskId, data: body, ...dialog("x", "Sam Ortiz", ctx.clock.now) }),
+          acceptSection2(ctx.deps, user, { taskId: ctx.taskId, ...dialog("x", "Sam Ortiz", ctx.clock.now) }),
         ).rejects.toMatchObject({ code: "FORBIDDEN_ROLE" })
       }),
     )
@@ -181,18 +165,43 @@ describe("review_order", () => {
 })
 
 describe("verify_i9_section2", () => {
-  it("lists the uploaded documents, the checklist and the prefilled Section 2", () => {
+  it("lists the uploaded documents with what the employee entered, in full for the specialist who signs", () => {
     const db = openDb()
     const ctx = atVerify(db)
     const data = loadI9Review(db, ctx.specialist, ctx.taskId, ctx.clock.now)!
     expect(data.documents.map((doc) => doc.kind)).toEqual(["list_a"])
     expect(data.documents[0].url).toMatch(/^\/api\/documents\//)
-    expect(data.comboValid).toBe(true)
-    expect(data.checklist.length).toBeGreaterThan(3)
+    expect(data.documents[0].details).toEqual(PASSPORT)
+    expect(data.readiness).toBe("ready")
     expect(data.history).toEqual([])
-    expect(data.prefill).toMatchObject({ employerRepFirstName: "Sam", employerRepTitle: "Onboarding Specialist", firstDayOfEmployment: "2026-03-02" })
+    expect(data.signerName).toBe("Sam Ortiz")
     expect(data.canAct).toBe(true)
     expect(data.rejectable).toBe(true)
+  })
+
+  it("says an upload without the employee's details cannot be signed, and refuses to sign it", async () => {
+    const db = openDb()
+    const ctx = atVerify(db)
+    ctx.driver.upload("list_a", "old-passport.png", null)
+    const data = loadI9Review(db, ctx.specialist, ctx.taskId, ctx.clock.now)!
+    expect(data.documents[0].details).toBeNull()
+    expect(data.readiness).toBe("missing_details")
+
+    await expect(prepareSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId })).rejects.toThrow(
+      "The employee has not entered the details of every document. Send them back to upload again.",
+    )
+    await expect(
+      acceptSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId, ...dialog("x", "Sam Ortiz", ctx.clock.now) }),
+    ).rejects.toBeInstanceOf(I9InputError)
+    expect(tasksForCase(db, ctx.caseId).find((task) => task.id === ctx.taskId)!.status).toBe("ready")
+  })
+
+  it("will not sign a document that expired after it was uploaded", async () => {
+    const db = openDb()
+    const ctx = atVerify(db)
+    ctx.clock.set("2034-05-16T12:00:00Z")
+    expect(loadI9Review(db, ctx.specialist, ctx.taskId, ctx.clock.now)!.readiness).toBe("expired")
+    await expect(prepareSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId })).rejects.toThrow("A document has expired. Send it back.")
   })
 
   it("rejecting spawns fix_documents and a replacement verify task; the employee sees the reason", () => {
@@ -223,7 +232,6 @@ describe("verify_i9_section2", () => {
     expect(review.history[0]).toMatchObject({ code: "DOC_ILLEGIBLE", by: "Sam Ortiz" })
     expect(review.history[0].note).toContain("too dark to read")
     expect(review.documents).toHaveLength(1)
-    expect(review.replaced).toHaveLength(1)
   })
 
   it("requires an OTHER rejection to carry a note", () => {
@@ -234,17 +242,15 @@ describe("verify_i9_section2", () => {
     expect(tasksForCase(db, ctx.caseId).find((task) => task.id === ctx.taskId)!.status).toBe("ready")
   })
 
-  it("accepting stores Section 2 with the typed e-signature, an encrypted document number and a verifiable hash", async () => {
+  it("accepting fills Section 2 from the employee's entries and stores it signed, with an encrypted document number", async () => {
     const db = openDb()
     const ctx = atVerify(db)
-    const data = section2()
-    const prepared = await prepareSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId, data })
+    const prepared = await prepareSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId })
     const field = prepared.fields.find((candidate) => candidate.kind === "signature")!
     expect(prepared.signer.name).toBe("Sam Ortiz")
 
     const accepted = await acceptSection2(ctx.deps, ctx.specialist, {
       taskId: ctx.taskId,
-      data,
       ...dialog(field.id, "Sam Ortiz", ctx.clock.now),
     })
     expect(accepted.sha256).toMatch(/^[0-9a-f]{64}$/)
@@ -261,8 +267,17 @@ describe("verify_i9_section2", () => {
     expect(check.valid).toBe(true)
 
     const form = db.select().from(formSubmissions).where(and(eq(formSubmissions.caseId, ctx.caseId), eq(formSubmissions.formType, "i9_section2"))).get()!
-    expect(form.dataJson).not.toContain("123456789")
-    expect(decryptFields(form.encryptedJson!)).toMatchObject({ documentNumber: "123456789" })
+    expect(JSON.parse(form.dataJson)).toMatchObject({ documentTitle: PASSPORT.title, issuingAuthority: PASSPORT.issuingAuthority, expiresOn: PASSPORT.expiresOn })
+    expect(form.dataJson).not.toContain(PASSPORT.number)
+    expect(decryptFields(form.encryptedJson!)).toMatchObject({ documentNumber: PASSPORT.number })
+    const task = tasksForCase(db, ctx.caseId).find((candidate) => candidate.id === ctx.taskId)!
+    expect(JSON.stringify(task.result)).not.toContain(PASSPORT.number)
+    const events = db.select().from(caseEvents).where(eq(caseEvents.caseId, ctx.caseId)).all()
+    expect(events.every((event) => !(event.payloadJson ?? "").includes(PASSPORT.number))).toBe(true)
+
+    const done = loadI9Review(db, ctx.specialist, ctx.taskId, ctx.clock.now)!
+    expect(done.verifiedAs).toMatchObject({ title: PASSPORT.title })
+    expect(done.documents[0].details?.number).toBe("•••• 0174")
 
     const read = await readStaffDocument(db, ctx.specialist, accepted.documentId)
     expect(read).toMatchObject({ ok: true, sha256: accepted.sha256 })
@@ -271,10 +286,9 @@ describe("verify_i9_section2", () => {
   it("serves a signed document only to a specialist and refuses one whose bytes changed", async () => {
     const db = openDb()
     const ctx = atVerify(db)
-    const data = section2()
-    const prepared = await prepareSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId, data })
+    const prepared = await prepareSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId })
     const field = prepared.fields.find((candidate) => candidate.kind === "signature")!
-    const accepted = await acceptSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId, data, ...dialog(field.id, "Sam Ortiz", ctx.clock.now) })
+    const accepted = await acceptSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId, ...dialog(field.id, "Sam Ortiz", ctx.clock.now) })
 
     for (const userId of [SEED_IDS.users.clientHr, SEED_IDS.users.finance, ctx.workerUserId]) {
       expect(await readStaffDocument(db, sessionUser(db, userId), accepted.documentId)).toMatchObject({ ok: false, reason: "forbidden" })
@@ -291,17 +305,12 @@ describe("verify_i9_section2", () => {
     expect(await readStaffDocument(db, ctx.specialist, accepted.documentId)).toMatchObject({ ok: false, reason: "tampered" })
   })
 
-  it("does not complete without the signature or with documents that differ from the upload", async () => {
+  it("does not complete without the signature", async () => {
     const db = openDb()
     const ctx = atVerify(db)
-    const data = section2()
-    await expect(acceptSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId, data, signature: { typedName: "Sam Ortiz", consentedAt: ctx.clock.now.toISOString() }, fieldValues: {} })).rejects.toThrow(/Sign the document/)
-
-    const bc = section2({ listA: [], listB: LICENSE, listC: SSN_CARD })
     await expect(
-      acceptSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId, data: bc, signature: { typedName: "Sam Ortiz", consentedAt: ctx.clock.now.toISOString() }, fieldValues: {} }),
-    ).rejects.toBeInstanceOf(I9InputError)
-    await expect(prepareSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId, data: section2({ listA: [] }) })).rejects.toBeInstanceOf(I9InputError)
+      acceptSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId, signature: { typedName: "Sam Ortiz", consentedAt: ctx.clock.now.toISOString() }, fieldValues: {} }),
+    ).rejects.toThrow(/Sign the document/)
     expect(tasksForCase(db, ctx.caseId).find((task) => task.id === ctx.taskId)!.status).toBe("ready")
     expect(db.select().from(generatedDocuments).where(eq(generatedDocuments.kind, "i9_section2")).all()).toHaveLength(0)
   })
@@ -312,7 +321,14 @@ describe("verify_i9_section2", () => {
     ctx.driver.drive({ stop: ["upload_documents"] })
     const worker = sessionUser(db, ctx.workerUserId)
     for (const kind of ["list_b", "list_c"] as const) {
-      uploadCaseDocument(ctx.deps, { actor: worker, caseId: ctx.caseId, kind, fileName: `${kind}.png`, storagePath: `data/uploads/${kind}.png` })
+      uploadCaseDocument(ctx.deps, {
+        actor: worker,
+        caseId: ctx.caseId,
+        kind,
+        fileName: `${kind}.png`,
+        storagePath: `data/uploads/${kind}.png`,
+        details: SAMPLE_IDENTITY_DETAILS[kind],
+      })
     }
     const upload = ctx.driver.find("upload_documents")!
     const documentIds = db.select().from(caseDocuments).where(eq(caseDocuments.caseId, ctx.caseId)).all().map((row) => row.id)
@@ -322,15 +338,34 @@ describe("verify_i9_section2", () => {
     const specialist = sessionUser(db, SEED_IDS.users.specialist)
     const taskId = ctx.driver.find("verify_i9_section2")!.id
     const review = loadI9Review(db, specialist, taskId, ctx.clock.now)!
-    expect(review.documents.map((doc) => doc.kind).sort()).toEqual(["list_b", "list_c"])
-    expect(review.prefill.listB).toBeTruthy()
+    expect(review.documents.map((doc) => doc.kind)).toEqual(["list_b", "list_c"])
+    expect(review.documents.map((doc) => doc.details?.title)).toEqual(["Driver's license", "Social Security Account Number card (unrestricted)"])
+    expect(review.canAct).toBe(true)
+    expect(review.documents.map((doc) => doc.details?.number)).toEqual(["D4471920", "***-**-6789"])
 
-    const data = section2({ listA: [], listB: LICENSE, listC: SSN_CARD })
-    const prepared = await prepareSection2(ctx.deps, specialist, { taskId, data })
+    const drawer = JSON.stringify(loadDrawerTask(db, specialist, taskId, ctx.clock.now))
+    expect(drawer).toContain("***-**-6789")
+    expect(drawer).not.toContain("123-45-6789")
+    expect(drawer).not.toContain("123456789")
+
+    const prepared = await prepareSection2(ctx.deps, specialist, { taskId })
+    const filled = (await PDFDocument.load(prepared.pdf)).getForm()
+    expect(filled.getTextField("List C Document Title 1").getText()).toBe("Social Security Account Number card (unrestricted)")
+    expect(filled.getTextField("List C Document Number 1").getText()).toBe("123-45-6789")
     const field = prepared.fields.find((candidate) => candidate.kind === "signature")!
-    await acceptSection2(ctx.deps, specialist, { taskId, data, ...dialog(field.id, "Sam Ortiz", ctx.clock.now) })
+    const accepted = await acceptSection2(ctx.deps, specialist, { taskId, ...dialog(field.id, "Sam Ortiz", ctx.clock.now) })
     expect(tasksForCase(db, ctx.caseId).find((task) => task.id === taskId)!.status).toBe("done")
-    expect(handlerPayload(data)).toMatchObject({ documentTitle: "Driver's license + Social Security card", expiresOn: "2030-01-01" })
+    const doc = db.select().from(generatedDocuments).where(eq(generatedDocuments.id, accepted.documentId)).get()!
+    expect((await verifySignedDocument(readSignedFile(doc.storagePath!)!, { expectedSha256: accepted.sha256 })).valid).toBe(true)
+    const done = loadI9Review(db, specialist, taskId, ctx.clock.now)!
+    expect(done.documents.map((row) => row.details?.number)).toEqual(["•••• 1920", "***-**-6789"])
+    const form = db.select().from(formSubmissions).where(and(eq(formSubmissions.caseId, ctx.caseId), eq(formSubmissions.formType, "i9_section2"))).get()!
+    expect(JSON.parse(form.dataJson)).toMatchObject({
+      documentTitle: "Driver's license + Social Security Account Number card (unrestricted)",
+      issuingAuthority: "California DMV + Social Security Administration",
+      expiresOn: "2031-01-31",
+    })
+    expect(decryptFields(form.encryptedJson!)).toMatchObject({ documentNumber: "D4471920; 123-45-6789" })
   })
 })
 
@@ -347,10 +382,9 @@ describe("setup_payroll", () => {
     expect(() => completeTaskAsActor(ctx.deps, { actor: ctx.specialist, taskId: payroll.id, payload: { payFrequency: "biweekly" } })).toThrow()
     expect(tasksForCase(db, ctx.caseId).find((task) => task.id === payroll.id)!.status).toBe("blocked")
 
-    const data = section2()
-    const prepared = await prepareSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId, data })
+    const prepared = await prepareSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId })
     const field = prepared.fields.find((candidate) => candidate.kind === "signature")!
-    await acceptSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId, data, ...dialog(field.id, "Sam Ortiz", ctx.clock.now) })
+    await acceptSection2(ctx.deps, ctx.specialist, { taskId: ctx.taskId, ...dialog(field.id, "Sam Ortiz", ctx.clock.now) })
 
     const ready = loadPayrollSetup(db, ctx.specialist, payroll.id, ctx.clock.now)!
     expect(ready.canAct).toBe(true)

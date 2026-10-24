@@ -67,15 +67,32 @@ function StatusPill({
   )
 }
 
-export function InvoiceStatusBadge({ status, className }: { status: InvoiceDisplayStatus; className?: string }) {
+type InvoiceStatusProps = {
+  status: InvoiceDisplayStatus
+  /** The word for an audience with its own vocabulary (Finance's "Unpaid"); the client's by default. */
+  labels?: Record<InvoiceDisplayStatus, string>
+  className?: string
+}
+
+export function InvoiceStatusBadge({ status, labels = INVOICE_STATUS_LABEL, className }: InvoiceStatusProps) {
   return (
     <StatusPill
       tone={INVOICE_TONE[status]}
-      label={INVOICE_STATUS_LABEL[status]}
+      label={labels[status]}
       slot="invoice-status"
       value={status}
       className={className}
     />
+  )
+}
+
+/** The status in a dense row or a table cell: the tone's dot and the word, without the pill. */
+export function InvoiceStatusDot({ status, labels = INVOICE_STATUS_LABEL, className }: InvoiceStatusProps) {
+  return (
+    <span data-slot="invoice-status" data-status={status} className={cn("inline-flex items-center gap-1.5 text-sm whitespace-nowrap", className)}>
+      <span aria-hidden className={cn("size-1.5 rounded-full", INVOICE_TONE[status].dot)} />
+      {labels[status]}
+    </span>
   )
 }
 

@@ -177,6 +177,10 @@ export async function uploadDocumentAction(
   const kind = formData.get("kind")
   const file = formData.get("file")
   if (typeof kind !== "string" || !(file instanceof File)) return fail("validation", "Choose a file to upload.")
+  const text = (name: string) => {
+    const value = formData.get(name)
+    return typeof value === "string" ? value : undefined
+  }
   return run(async (user) => {
     const bytes = new Uint8Array(await file.arrayBuffer())
     const stored = await uploadIdentityDocument(deps(), user, {
@@ -185,6 +189,12 @@ export async function uploadDocumentAction(
       fileName: file.name,
       declaredType: file.type,
       bytes,
+      details: {
+        title: text("title"),
+        issuingAuthority: text("issuingAuthority"),
+        number: text("number"),
+        expiresOn: text("expiresOn"),
+      },
     })
     revalidatePath("/worker", "layout")
     return stored

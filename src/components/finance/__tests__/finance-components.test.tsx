@@ -19,18 +19,20 @@ import {
   type PayOutcome,
   type PaymentViewStatus,
 } from "@/lib/finance-view"
+import { paymentView, type FinanceDrawerView } from "@/lib/finance-drawer"
 import { formatIsoDay } from "@/lib/finance-format"
 import { formatCents } from "@/lib/format"
 
 import { FinanceDashboard } from "../finance-dashboard"
 import { FinanceSummaryTiles } from "../finance-summary-tiles"
+import { FinanceDrawer } from "../finance-drawer"
 import { InvoiceDrawer } from "../invoice-drawer"
 import { InvoiceStatusBadge, PaymentStatusBadge } from "../invoice-status-badge"
 import { InvoiceTable } from "../invoice-table"
 import { InvoicesPanel } from "../invoices-panel"
 import { MoneyCell } from "../money-cell"
 import { PayDialog } from "../pay-dialog"
-import { PaymentsTable } from "../payments-table"
+import { PaymentsList } from "../payments-list"
 
 const fx = buildFinanceFixtures()
 const payableRows = fx.rows.filter(isPayableRow)
@@ -48,7 +50,7 @@ function Panel({
   invoices?: readonly InvoiceRow[]
   canPay?: boolean
   onPay?: (ids: string[]) => void
-  onOpen?: (row: InvoiceRow) => void
+  onOpen?: (row: InvoiceRow, orderedIds: string[]) => void
 }) {
   const [selected, setSelected] = React.useState<ReadonlySet<string>>(new Set())
   return (
@@ -227,12 +229,16 @@ describe("InvoicesPanel selection and pay actions", () => {
     expect(screen.getByTestId("pay-bar-summary")).toHaveTextContent("No payment method on file.")
   })
 
-  it("opens an invoice when its number is clicked", async () => {
+  it("opens an invoice when its number is clicked, with the listed rows in order for the stepper", async () => {
     const user = userEvent.setup()
     const onOpen = vi.fn()
     render(<Panel onOpen={onOpen} />)
     await user.click(within(rowFor(firstPage[0].number)).getByTestId("invoice-open"))
-    expect(onOpen).toHaveBeenCalledWith(firstPage[0])
+    const listed = screen.getAllByTestId("invoice-row").map((row) => within(row).getByTestId("invoice-open").textContent)
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    const [row, ids] = onOpen.mock.calls[0]
+    expect(row).toEqual(firstPage[0])
+    expect(ids.map((id: string) => firstPage.find((r) => r.id === id)!.number)).toEqual(listed)
   })
 })
 
@@ -409,14 +415,25 @@ describe("PayDialog", () => {
   })
 })
 
-describe("InvoiceDrawer", () => {
-  const paid = fx.rows.find((row) => row.displayStatus === "paid")!
-  const due = payableRows[0]
-  const pdfHref = (id: string) => `/client/finance/invoices/${id}/pdf`
+const byNumber = (number: string) => fx.rows.find((row) => row.number === number)!
+const paymentById = (id: string) => fx.paymentRows.find((payment) => payment.id === id)!
+const loadFixtureDetail = async (id: string) => fx.detailById[id] ?? null
+const pdfHref = (id: string) => `/client/finance/invoices/${id}/pdf`
 
-  it("shows a skeleton, then the itemised lines, total and payment history", async () => {
-    const loadDetail = vi.fn(async (id: string) => fx.detailById[id])
-    render(<InvoiceDrawer row={paid} loadDetail={loadDetail} pdfHref={pdfHref} canPay onPay={() => {}} onClose={() => {}} />)
+describe("InvoiceDrawer", () => {
+  const paid = fx.rows.find((row) => row.displayStatus === "paid" && row.kind === "payroll")!
+  const due = fx.rows.find((row) => row.displayStatus === "open" && row.kind === "payroll")!
+  const overdue = fx.rows.find((row) => row.displayStatus === "overdue" && row.kind === "payroll")!
+  const deposit = fx.rows.find((row) => row.kind === "deposit" && isPayableRow(row))!
+  const processing = fx.rows.find((row) => row.displayStatus === "processing")!
+  const voided = fx.rows.find((row) => row.displayStatus === "void")!
+
+  function drawer(row: InvoiceRow | null, props: Partial<React.ComponentProps<typeof InvoiceDrawer>> = {}) {
+    return render(<InvoiceDrawer row={row} loadDetail={loadFixtureDetail} pdfHref={pdfHref} canPay onPay={() => {}} onClose={() => {}} {...props} />)
+  }
+
+  it("shows a skeleton, then the facts, every line, the total and the payment history", async () => {
+    drawer(paid)
     expect(screen.getByTestId("drawer-number")).toHaveTextContent(paid.number)
     expect(screen.getByTestId("drawer-loading")).toBeInTheDocument()
     const lines = await screen.findByTestId("drawer-lines")
@@ -424,214 +441,343 @@ describe("InvoiceDrawer", () => {
     expect(within(lines).getAllByTestId("drawer-line")).toHaveLength(detail.lines.length)
     expect(screen.getByTestId("drawer-person")).toHaveTextContent(detail.person.name)
     expect(screen.getByTestId("drawer-period")).toHaveTextContent(invoicePeriodLabel(detail))
+    expect(screen.getByTestId("drawer-due-date")).toHaveTextContent(formatIsoDay(paid.dueDate))
+    expect(screen.getByTestId("drawer-paid-date")).toHaveTextContent(formatIsoDay(paid.paidDate!))
     expect(screen.getByTestId("drawer-total")).toHaveTextContent(formatCents(detail.totalCents))
+    expect(screen.queryByTestId("drawer-due")).not.toBeInTheDocument()
     expect(screen.getByTestId("drawer-payments")).toHaveTextContent("Settled")
     expect(screen.queryByTestId("drawer-pay")).not.toBeInTheDocument()
   })
 
-  it("links the PDF download to the invoice's route", () => {
-    render(<InvoiceDrawer row={paid} loadDetail={async (id) => fx.detailById[id]} pdfHref={pdfHref} canPay onPay={() => {}} onClose={() => {}} />)
-    expect(screen.getByTestId("drawer-pdf")).toHaveAttribute("href", pdfHref(paid.id))
+  it("names the kind of invoice under the number", () => {
+    const { unmount } = drawer(due)
+    expect(within(screen.getByTestId("drawer-header")).getByText("Payroll invoice")).toBeInTheDocument()
+    unmount()
+    drawer(deposit)
+    expect(within(screen.getByTestId("drawer-header")).getByText("Deposit invoice")).toBeInTheDocument()
   })
 
-  it("offers Pay for a payable invoice and passes the row on", async () => {
+  it("puts Pay first and Download PDF as a named icon link in the header, and no other buttons", async () => {
     const user = userEvent.setup()
     const onPay = vi.fn()
-    render(<InvoiceDrawer row={due} loadDetail={async (id) => fx.detailById[id]} pdfHref={pdfHref} canPay onPay={onPay} onClose={() => {}} />)
-    await user.click(screen.getByTestId("drawer-pay"))
+    drawer(due, { onPay })
+    const actions = screen.getByTestId("drawer-actions")
+    const [first, second, ...rest] = Array.from(actions.children)
+    expect(rest).toHaveLength(0)
+    expect(first).toBe(screen.getByTestId("drawer-pay"))
+    expect(first).toHaveTextContent(`Pay ${formatCents(due.totalCents)}`)
+    expect(second).toBe(screen.getByRole("link", { name: "Download PDF" }))
+    expect(second).toHaveAttribute("href", pdfHref(due.id))
+    expect(second).toHaveAttribute("download")
+    expect(second).toHaveTextContent("")
+    await user.click(first as HTMLElement)
     expect(onPay).toHaveBeenCalledWith(expect.objectContaining({ id: due.id, totalCents: due.totalCents }))
   })
 
-  it("disables Pay when payment is not available", () => {
-    render(<InvoiceDrawer row={due} loadDetail={async (id) => fx.detailById[id]} pdfHref={pdfHref} canPay={false} onPay={() => {}} onClose={() => {}} />)
-    expect(screen.getByTestId("drawer-pay")).toBeDisabled()
+  it("closes only from the corner X: no Close button and no link to a full invoice page", async () => {
+    drawer(due)
+    await screen.findByTestId("drawer-lines")
+    expect(screen.getAllByRole("button", { name: /close/i })).toHaveLength(1)
+    expect(screen.queryByText(/view full invoice/i)).not.toBeInTheDocument()
+    expect(screen.queryByTestId("drawer-full-invoice")).not.toBeInTheDocument()
   })
 
-  it("says so when the detail cannot be loaded", async () => {
-    render(<InvoiceDrawer row={due} loadDetail={async () => null} pdfHref={pdfHref} canPay onPay={() => {}} onClose={() => {}} />)
-    expect(await screen.findByTestId("drawer-unavailable")).toBeInTheDocument()
+  it("hides Pay when the viewer cannot pay or the invoice is not payable", () => {
+    const { unmount } = drawer(due, { canPay: false })
+    expect(screen.queryByTestId("drawer-pay")).not.toBeInTheDocument()
+    expect(screen.getByTestId("drawer-pdf")).toBeInTheDocument()
+    unmount()
+    drawer(processing)
+    expect(screen.queryByTestId("drawer-pay")).not.toBeInTheDocument()
   })
 
-  it("never drops the lines silently: a failed load explains itself and retries", async () => {
+  it("leaves out the payment history when there are no payments", async () => {
+    drawer(due)
+    await screen.findByTestId("drawer-lines")
+    expect(fx.detailById[due.id].payments).toHaveLength(0)
+    expect(screen.queryByTestId("drawer-payments")).not.toBeInTheDocument()
+    expect(screen.queryByText("Payments")).not.toBeInTheDocument()
+  })
+
+  it("says Overdue once, in the header", async () => {
+    drawer(overdue)
+    await screen.findByTestId("drawer-lines")
+    expect(within(screen.getByTestId("drawer-header")).getByText(INVOICE_STATUS_LABEL.overdue)).toBeInTheDocument()
+    expect(within(screen.getByTestId("drawer-scroll")).queryByText(/overdue/i)).not.toBeInTheDocument()
+    expect(screen.getByTestId("drawer-due")).toHaveTextContent(formatCents(overdue.totalCents))
+  })
+
+  it("leaves out the subtotal of an invoice's only group, which would repeat the total", async () => {
+    drawer(deposit)
+    await screen.findByTestId("drawer-lines")
+    expect(fx.detailById[deposit.id].groups).toHaveLength(1)
+    expect(fx.detailById[deposit.id].lines.length).toBeGreaterThan(1)
+    expect(screen.queryByTestId("drawer-subtotal")).not.toBeInTheDocument()
+    expect(screen.getByTestId("drawer-total")).toHaveTextContent(formatCents(deposit.totalCents))
+  })
+
+  it("shows a group's subtotal only when the group has more than one line", async () => {
+    drawer(due)
+    await screen.findByTestId("drawer-lines")
+    const detail = fx.detailById[due.id]
+    const groups = screen.getAllByTestId("drawer-group")
+    expect(groups).toHaveLength(detail.groups.length)
+    detail.groups.forEach((group, index) => {
+      const subtotal = within(groups[index]).queryByTestId("drawer-subtotal")
+      if (group.lines.length > 1) expect(subtotal).toHaveTextContent(formatCents(group.subtotalCents))
+      else expect(subtotal).not.toBeInTheDocument()
+    })
+  })
+
+  it("says why a void invoice is void and what was due", async () => {
+    drawer(voided)
+    await screen.findByTestId("drawer-lines")
+    expect(screen.getByTestId("drawer-void-reason")).toHaveTextContent(fx.detailById[voided.id].voidReason!)
+    expect(screen.getByTestId("drawer-totals")).toHaveTextContent("Amount due (void)")
+  })
+
+  it("steps through the list it was opened from, disabled at either end", async () => {
+    const user = userEvent.setup()
+    const onStep = vi.fn()
+    const { rerender } = drawer(due, { stepper: { position: { index: 1, total: 3 }, onStep, noun: "invoice" } })
+    expect(screen.getByTestId("drawer-position")).toHaveTextContent("2 of 3")
+    await user.click(screen.getByRole("button", { name: "Next invoice" }))
+    await user.click(screen.getByRole("button", { name: "Previous invoice" }))
+    expect(onStep.mock.calls).toEqual([[1], [-1]])
+    rerender(
+      <InvoiceDrawer row={due} loadDetail={loadFixtureDetail} pdfHref={pdfHref} canPay onPay={() => {}} onClose={() => {}} stepper={{ position: { index: 2, total: 3 }, onStep, noun: "invoice" }} />,
+    )
+    expect(screen.getByRole("button", { name: "Next invoice" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Previous invoice" })).toBeEnabled()
+  })
+
+  it("has no stepper when opened on its own", () => {
+    drawer(due)
+    expect(screen.queryByTestId("drawer-stepper")).not.toBeInTheDocument()
+  })
+
+  it("never drops the lines silently: a failed load says the total, changes nothing and retries", async () => {
     const user = userEvent.setup()
     const loadDetail = vi.fn<(id: string) => Promise<InvoiceDetail | null>>()
     loadDetail.mockResolvedValueOnce(null).mockResolvedValue(fx.detailById[due.id])
-    render(<InvoiceDrawer row={due} loadDetail={loadDetail} pdfHref={pdfHref} canPay onPay={() => {}} onClose={() => {}} />)
-    expect(await screen.findByTestId("drawer-unavailable")).toHaveTextContent(formatCents(due.totalCents))
+    drawer(due, { loadDetail })
+    const failure = await screen.findByTestId("drawer-unavailable")
+    expect(failure).toHaveRole("alert")
+    expect(failure).toHaveTextContent(formatCents(due.totalCents))
+    expect(failure).toHaveTextContent("Nothing has been changed.")
     await user.click(screen.getByTestId("drawer-retry"))
     expect(await screen.findAllByTestId("drawer-line")).toHaveLength(fx.detailById[due.id].lines.length)
     expect(loadDetail).toHaveBeenCalledTimes(2)
   })
 
-  it("links to the full invoice when given a route", () => {
-    render(
-      <InvoiceDrawer
-        row={due}
-        loadDetail={async (id) => fx.detailById[id]}
-        pdfHref={pdfHref}
-        invoiceHref={(id) => `/client/finance/invoices/${id}`}
-        canPay
-        onPay={() => {}}
-        onClose={() => {}}
-      />,
-    )
-    expect(screen.getByTestId("drawer-full-invoice")).toHaveAttribute("href", `/client/finance/invoices/${due.id}`)
+  it("treats a rejected load like a missing one", async () => {
+    drawer(due, { loadDetail: async () => Promise.reject(new Error("offline")) })
+    expect(await screen.findByTestId("drawer-unavailable")).toBeInTheDocument()
   })
 
   it("renders nothing while closed", () => {
-    render(<InvoiceDrawer row={null} loadDetail={async () => null} pdfHref={pdfHref} canPay onPay={() => {}} onClose={() => {}} />)
+    drawer(null)
     expect(screen.queryByTestId("invoice-drawer")).not.toBeInTheDocument()
   })
 })
 
-describe("PaymentsTable", () => {
-  const href = (id: string) => `/client/finance/invoices/${id}`
-  const multi = fx.paymentRows.find((p) => p.invoices.length > 1)!
-  const manyPayments = Array.from({ length: 23 }, (_, i) => ({ ...fx.paymentRows[i % fx.paymentRows.length], id: `pay_many_${String(i).padStart(2, "0")}` }))
+describe("PaymentsList", () => {
+  const sectionLabels = () =>
+    screen.getAllByTestId("list-section").map((section) => within(section).getByRole("button", { expanded: section.querySelector("ul") !== null }).textContent)
 
   it("explains an empty history", () => {
-    render(<PaymentsTable payments={[]} />)
+    render(<PaymentsList payments={[]} invoices={fx.rows} onOpen={() => {}} keyboard />)
     expect(screen.getByTestId("no-payments")).toHaveTextContent("No payments yet.")
   })
 
-  it("lists each payment with its status, amount and the invoices it covers", () => {
-    render(<PaymentsTable payments={fx.paymentRows} invoices={fx.rows} invoiceHref={href} />)
-    const rows = screen.getAllByTestId("payment-row")
-    expect(rows).toHaveLength(fx.paymentRows.length)
-    const failed = rows.find((row) => row.getAttribute("data-status") === "failed")!
-    expect(failed).toHaveTextContent("Insufficient funds")
-    const multiRow = rows[fx.paymentRows.indexOf(multi)]
-    expect(multiRow).toHaveTextContent(formatCents(multi.amountCents))
+  it("groups In progress and still-owed Failed first, then months newest first, with counts and no column headers", () => {
+    render(<PaymentsList payments={fx.paymentRows} invoices={fx.rows} onOpen={() => {}} keyboard />)
+    expect(sectionLabels()).toEqual(["In progress1", "Failed1", "March 20261", "February 20263", "January 20263"])
+    expect(screen.queryAllByRole("columnheader")).toHaveLength(0)
+    const sections = screen.getAllByTestId("list-section")
+    expect(within(sections[0]).getAllByTestId("payment-row").map((row) => row.getAttribute("data-status"))).toEqual(["initiated"])
+    expect(within(sections[1]).getAllByTestId("payment-row").map((row) => row.getAttribute("data-status"))).toEqual(["failed"])
   })
 
-  it("shows one covered invoice as a new-tab link and several as an \"N invoices\" button, never a row of links", () => {
-    render(<PaymentsTable payments={fx.paymentRows} invoices={fx.rows} invoiceHref={href} />)
-    const rows = screen.getAllByTestId("payment-row")
-    fx.paymentRows.forEach((payment, index) => {
-      const row = rows[index]
-      if (payment.invoices.length === 1) {
-        const link = within(row).getByTestId("payment-invoice")
-        expect(link.tagName).toBe("A")
-        expect(link).toHaveTextContent(payment.invoices[0].number)
-        expect(link).toHaveAttribute("target", "_blank")
-        expect(link.getAttribute("rel")).toContain("noopener")
-        expect(link.getAttribute("rel")).toContain("noreferrer")
-        expect(link).toHaveAttribute("href", href(payment.invoices[0].id))
-        expect(within(row).queryByTestId("payment-invoices-trigger")).not.toBeInTheDocument()
-      } else {
-        const trigger = within(row).getByTestId("payment-invoices-trigger")
-        expect(trigger.tagName).toBe("BUTTON")
-        expect(trigger).toHaveTextContent(`${payment.invoices.length} invoices`)
-        expect(within(row).queryByTestId("payment-invoice")).not.toBeInTheDocument()
-        expect(row).not.toHaveTextContent(payment.invoices[0].number)
-      }
-    })
-  })
-
-  it("opens a dialog for a payment with several invoices: payment in the title, each invoice a new-tab row", async () => {
+  it("starts months after the newest two collapsed, and toggles a section", async () => {
     const user = userEvent.setup()
-    render(<PaymentsTable payments={fx.paymentRows} invoices={fx.rows} invoiceHref={href} />)
-    const row = screen.getAllByTestId("payment-row")[fx.paymentRows.indexOf(multi)]
-    const trigger = within(row).getByTestId("payment-invoices-trigger")
-    await user.click(trigger)
-
-    const dialog = await screen.findByRole("dialog")
-    const title = within(dialog).getByTestId("payment-invoices-title")
-    expect(title).toHaveTextContent(formatCents(multi.amountCents))
-    expect(title).toHaveTextContent(formatIsoDay(multi.initiatedAt))
-    expect(title).toHaveTextContent({ initiated: "Processing", settled: "Settled", failed: "Failed" }[multi.status])
-    expect(dialog).toHaveAccessibleName(/Payment of/)
-
-    const items = within(dialog).getAllByTestId("payment-invoice")
-    expect(items).toHaveLength(multi.invoices.length)
-    multi.invoices.forEach((ref, index) => {
-      const source = fx.rows.find((r) => r.id === ref.id)!
-      const item = items[index]
-      expect(item.tagName).toBe("A")
-      expect(item).toHaveAttribute("href", href(ref.id))
-      expect(item).toHaveAttribute("target", "_blank")
-      expect(item.getAttribute("rel")).toContain("noopener")
-      expect(item.getAttribute("rel")).toContain("noreferrer")
-      expect(item).toHaveTextContent(ref.number)
-      expect(item).toHaveTextContent(source.personName)
-      if (source.personTitle) expect(item).toHaveTextContent(source.personTitle)
-      expect(within(item).getByTestId("payment-invoice-period")).toHaveTextContent(invoicePeriodLabel(source))
-      expect(item).toHaveTextContent(formatCents(source.totalCents))
-    })
+    render(<PaymentsList payments={fx.paymentRows} invoices={fx.rows} onOpen={() => {}} keyboard />)
+    const january = screen.getAllByTestId("list-section").find((section) => section.getAttribute("data-section") === "month:2026-01")!
+    const toggle = within(january).getByRole("button", { name: /January 2026/ })
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(within(january).queryAllByTestId("payment-row")).toHaveLength(0)
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+    expect(within(january).getAllByTestId("payment-row")).toHaveLength(3)
+    const march = screen.getAllByTestId("list-section").find((section) => section.getAttribute("data-section") === "month:2026-03")!
+    await user.click(within(march).getByRole("button", { name: /March 2026/ }))
+    expect(within(march).queryAllByTestId("payment-row")).toHaveLength(0)
   })
 
-  it("closes the dialog with Escape and returns focus to the \"N invoices\" button", async () => {
-    const user = userEvent.setup()
-    render(<PaymentsTable payments={fx.paymentRows} invoices={fx.rows} invoiceHref={href} />)
-    const trigger = within(screen.getAllByTestId("payment-row")[fx.paymentRows.indexOf(multi)]).getByTestId("payment-invoices-trigger")
-    await user.click(trigger)
-    await screen.findByRole("dialog")
-    await user.keyboard("{Escape}")
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
-    expect(trigger).toHaveFocus()
+  it("files a failed payment whose invoices were paid since under its month, still marked Failed", () => {
+    const failed = paymentById("pay_008")
+    const paidSince = fx.rows.map((row) => (failed.invoices.some((ref) => ref.id === row.id) ? { ...row, displayStatus: "paid" as const } : row))
+    render(<PaymentsList payments={fx.paymentRows} invoices={paidSince} onOpen={() => {}} keyboard />)
+    expect(sectionLabels()).toEqual(["In progress1", "March 20262", "February 20263", "January 20263"])
+    const row = screen.getAllByTestId("payment-row").find((r) => r.getAttribute("data-payment-id") === failed.id)!
+    expect(row).toHaveAttribute("data-status", "failed")
+    expect(row).toHaveTextContent("Failed")
   })
 
-  it("reaches the dialog rows by keyboard", async () => {
+  it("shows the amount and what it covered, the method and start day, and the status", () => {
+    render(<PaymentsList payments={fx.paymentRows} invoices={fx.rows} onOpen={() => {}} keyboard />)
+    const single = paymentById("pay_008")
+    const multi = paymentById("pay_009")
+    const row = (id: string) => screen.getAllByTestId("payment-row").find((r) => r.getAttribute("data-payment-id") === id)!
+    expect(row(single.id)).toHaveTextContent(formatCents(single.amountCents))
+    expect(within(row(single.id)).getByTestId("payment-cover")).toHaveTextContent(single.invoices[0].number)
+    expect(row(single.id)).toHaveTextContent(`${single.methodLabel} · ${formatIsoDay(single.initiatedAt)}`)
+    expect(row(single.id)).toHaveTextContent(PAYMENT_STATUS_LABEL.failed)
+    expect(within(row(multi.id)).getByTestId("payment-cover")).toHaveTextContent("2 invoices")
+    expect(row(multi.id)).toHaveTextContent(PAYMENT_STATUS_LABEL.initiated)
+    expect(row(multi.id)).not.toHaveTextContent(multi.invoices[0].number)
+  })
+
+  it("opens a payment from its row with every payment id in list order", async () => {
     const user = userEvent.setup()
-    render(<PaymentsTable payments={fx.paymentRows} invoices={fx.rows} invoiceHref={href} />)
-    const trigger = within(screen.getAllByTestId("payment-row")[fx.paymentRows.indexOf(multi)]).getByTestId("payment-invoices-trigger")
-    trigger.focus()
+    const onOpen = vi.fn()
+    render(<PaymentsList payments={fx.paymentRows} invoices={fx.rows} onOpen={onOpen} keyboard />)
+    const row = screen.getAllByTestId("payment-row").find((r) => r.getAttribute("data-payment-id") === "pay_005")!
+    await user.click(within(row).getByTestId("payment-open"))
+    expect(onOpen).toHaveBeenCalledWith("pay_005", ["pay_009", "pay_008", "pay_007", "pay_006", "pay_005", "pay_004", "pay_003", "pay_002", "pay_001"])
+  })
+
+  it("moves a cursor with j and k through the visible rows and opens it with Enter", async () => {
+    const user = userEvent.setup()
+    const onOpen = vi.fn()
+    render(<PaymentsList payments={fx.paymentRows} invoices={fx.rows} onOpen={onOpen} keyboard />)
+    await user.keyboard("jjjk")
+    const cursorRow = screen.getAllByTestId("payment-row").find((r) => r.hasAttribute("data-cursor"))!
+    expect(cursorRow).toHaveAttribute("data-payment-id", "pay_008")
     await user.keyboard("{Enter}")
-    const dialog = await screen.findByRole("dialog")
-    for (const item of within(dialog).getAllByTestId("payment-invoice")) {
-      expect(item.getAttribute("tabindex")).not.toBe("-1")
-      ;(item as HTMLElement).focus()
-      expect(item).toHaveFocus()
-    }
+    expect(onOpen).toHaveBeenCalledWith("pay_008", expect.any(Array))
   })
 
-  it("lists a payment with several invoices as plain rows when the page has no invoice route", async () => {
+  it("leaves the keyboard alone while the drawer is open", async () => {
     const user = userEvent.setup()
-    render(<PaymentsTable payments={[multi]} invoices={fx.rows} />)
-    await user.click(screen.getByTestId("payment-invoices-trigger"))
-    const dialog = await screen.findByRole("dialog")
-    for (const item of within(dialog).getAllByTestId("payment-invoice")) expect(item.tagName).not.toBe("A")
+    const onOpen = vi.fn()
+    render(<PaymentsList payments={fx.paymentRows} invoices={fx.rows} onOpen={onOpen} keyboard={false} />)
+    await user.keyboard("j{Enter}")
+    expect(screen.getAllByTestId("payment-row").some((r) => r.hasAttribute("data-cursor"))).toBe(false)
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+})
+
+describe("FinanceDrawer: the payment drawer", () => {
+  function Harness({ initial, invoiceHref }: { initial: FinanceDrawerView; invoiceHref?: (id: string) => string }) {
+    const [view, setView] = React.useState<FinanceDrawerView | null>(initial)
+    return (
+      <FinanceDrawer
+        view={view}
+        onViewChange={setView}
+        invoices={fx.rows}
+        payments={fx.paymentRows}
+        loadInvoiceDetail={loadFixtureDetail}
+        pdfHref={pdfHref}
+        invoiceHref={invoiceHref}
+        canPay
+        onPay={() => {}}
+      />
+    )
+  }
+  const allPayments = fx.paymentRows.map((payment) => payment.id)
+
+  it("shows the amount, status, what it covers, the method and start day, and each covered invoice as a row", () => {
+    const payment = paymentById("pay_009")
+    render(<Harness initial={paymentView(payment.id, [payment.id])} />)
+    const drawerEl = screen.getByTestId("payment-drawer")
+    expect(screen.getByTestId("payment-drawer-title")).toHaveTextContent(`Payment of ${formatCents(payment.amountCents)}`)
+    expect(within(screen.getByTestId("drawer-header")).getByText(PAYMENT_STATUS_LABEL.initiated)).toBeInTheDocument()
+    expect(within(screen.getByTestId("drawer-header")).getByText("Covers 2 invoices")).toBeInTheDocument()
+    expect(screen.getByTestId("payment-facts")).toHaveTextContent(payment.methodLabel)
+    expect(screen.getByTestId("payment-started")).toHaveTextContent(formatIsoDay(payment.initiatedAt))
+    expect(screen.queryByTestId("payment-settled")).not.toBeInTheDocument()
+    expect(screen.getByTestId("payment-note")).toHaveTextContent("on its way")
+    const items = within(drawerEl).getAllByTestId("payment-invoice")
+    expect(items).toHaveLength(2)
+    payment.invoices.forEach((ref, index) => {
+      const row = fx.rows.find((r) => r.id === ref.id)!
+      expect(within(items[index]).getByTestId("payment-invoice-number")).toHaveTextContent(row.number)
+      expect(within(items[index]).getByTestId("payment-invoice-person")).toHaveTextContent(`${row.personName} · ${invoicePeriodLabel(row)}`)
+      expect(within(items[index]).getByTestId("payment-invoice-amount")).toHaveTextContent(formatCents(row.totalCents))
+      expect(items[index]).toHaveTextContent(INVOICE_STATUS_LABEL[row.displayStatus])
+    })
+    expect(screen.queryByTestId("drawer-stepper")).not.toBeInTheDocument()
   })
 
-  it("shows every payment status: processing, settled and a failed attempt with its reason", () => {
-    render(<PaymentsTable payments={fx.paymentRows} />)
-    const statuses = new Set(screen.getAllByTestId("payment-row").map((row) => row.getAttribute("data-status")))
-    expect([...statuses].sort()).toEqual(["failed", "initiated", "settled"])
-  })
-
-  it("paginates once there are more than ten payments and not before", () => {
-    const { unmount } = render(<PaymentsTable payments={manyPayments} invoices={fx.rows} invoiceHref={href} />)
-    expect(screen.getAllByTestId("payment-row")).toHaveLength(10)
-    expect(screen.getByTestId("page-range")).toHaveTextContent("1–10 of 23")
+  it("gives a settled payment its settled day and a failed one its reason and what to do", () => {
+    const { unmount } = render(<Harness initial={paymentView("pay_007", allPayments)} />)
+    expect(screen.getByTestId("payment-settled")).toHaveTextContent(formatIsoDay(paymentById("pay_007").settledAt!))
+    expect(screen.queryByTestId("payment-note")).not.toBeInTheDocument()
+    expect(screen.getByTestId("payment-invoices")).toHaveTextContent("Invoices (3)")
     unmount()
-    render(<PaymentsTable payments={manyPayments.slice(0, 10)} invoices={fx.rows} invoiceHref={href} />)
-    expect(screen.queryByTestId("page-range")).not.toBeInTheDocument()
-    expect(screen.queryByRole("navigation", { name: "Pagination" })).not.toBeInTheDocument()
+    render(<Harness initial={paymentView("pay_008", allPayments)} />)
+    expect(screen.getByTestId("payment-failure")).toHaveTextContent("Insufficient funds")
+    expect(screen.getByTestId("payment-note")).toHaveTextContent("due again under Invoices")
+    expect(screen.getByTestId("payment-invoices")).toHaveTextContent("Invoice")
   })
 
-  it("moves between pages, keeps newest first and resets to page one when the page size changes", async () => {
+  it("steps through the payments list", async () => {
     const user = userEvent.setup()
-    render(<PaymentsTable payments={manyPayments} invoices={fx.rows} invoiceHref={href} />)
-    const ids = () => screen.getAllByTestId("payment-row").length
-    await user.click(screen.getByRole("button", { name: /next/i }))
-    expect(screen.getByTestId("page-range")).toHaveTextContent("11–20 of 23")
-    expect(ids()).toBe(10)
-    await user.click(screen.getByRole("button", { name: /next/i }))
-    expect(screen.getByTestId("page-range")).toHaveTextContent("21–23 of 23")
-    expect(ids()).toBe(3)
-    await user.click(screen.getByRole("combobox"))
-    await user.click(await screen.findByRole("option", { name: "25" }))
-    expect(screen.getByTestId("page-range")).toHaveTextContent("1–23 of 23")
-    expect(ids()).toBe(23)
+    render(<Harness initial={paymentView("pay_008", allPayments)} />)
+    expect(screen.getByTestId("drawer-position")).toHaveTextContent(`2 of ${allPayments.length}`)
+    await user.click(screen.getByRole("button", { name: "Next payment" }))
+    expect(screen.getByTestId("payment-drawer-title")).toHaveTextContent(formatCents(paymentById("pay_007").amountCents))
+    expect(screen.getByTestId("drawer-position")).toHaveTextContent(`3 of ${allPayments.length}`)
   })
 
-  it("stays on a valid page when the list shrinks", async () => {
+  it("swaps to a covered invoice in the same drawer, steps through the payment's invoices, and goes back", async () => {
     const user = userEvent.setup()
-    const { rerender } = render(<PaymentsTable payments={manyPayments} invoices={fx.rows} invoiceHref={href} />)
-    await user.click(screen.getByRole("button", { name: /next/i }))
-    await user.click(screen.getByRole("button", { name: /next/i }))
-    rerender(<PaymentsTable payments={manyPayments.slice(0, 12)} invoices={fx.rows} invoiceHref={href} />)
-    expect(screen.getByTestId("page-range")).toHaveTextContent("11–12 of 12")
+    const payment = paymentById("pay_009")
+    render(<Harness initial={paymentView(payment.id, allPayments)} />)
+    await user.click(screen.getAllByTestId("payment-invoice-open")[0])
+    expect(screen.getAllByRole("dialog")).toHaveLength(1)
+    expect(screen.getByTestId("invoice-drawer")).toBeInTheDocument()
+    expect(screen.getByTestId("drawer-number")).toHaveTextContent(payment.invoices[0].number)
+    expect(screen.getByTestId("drawer-position")).toHaveTextContent("1 of 2")
+    await user.click(screen.getByRole("button", { name: "Next invoice" }))
+    expect(screen.getByTestId("drawer-number")).toHaveTextContent(payment.invoices[1].number)
+    const back = screen.getByTestId("drawer-back")
+    expect(back).toHaveTextContent(`Payment of ${formatCents(payment.amountCents)}`)
+    await user.click(back)
+    expect(screen.getByTestId("payment-drawer-title")).toHaveTextContent(formatCents(payment.amountCents))
+    expect(screen.getByTestId("drawer-position")).toHaveTextContent(`1 of ${allPayments.length}`)
+  })
+
+  it("makes covered invoices real links when the page has an invoice URL, opening in place on a plain click", async () => {
+    const user = userEvent.setup()
+    const payment = paymentById("pay_007")
+    const href = (id: string) => `/client/finance?open=${id}`
+    render(<Harness initial={paymentView(payment.id, [payment.id])} invoiceHref={href} />)
+    const links = screen.getAllByTestId("payment-invoice-open")
+    links.forEach((link, index) => expect(link).toHaveAttribute("href", href(payment.invoices[index].id)))
+    await user.click(links[1])
+    expect(screen.getByTestId("drawer-number")).toHaveTextContent(payment.invoices[1].number)
+  })
+
+  it("shows a covered invoice it cannot find by number only, opening nothing", () => {
+    const payment = paymentById("pay_009")
+    render(
+      <FinanceDrawer
+        view={paymentView(payment.id, [payment.id])}
+        onViewChange={() => {}}
+        invoices={fx.rows.filter((row) => row.id !== payment.invoices[0].id)}
+        payments={fx.paymentRows}
+        loadInvoiceDetail={loadFixtureDetail}
+        pdfHref={pdfHref}
+        canPay
+        onPay={() => {}}
+      />,
+    )
+    const items = screen.getAllByTestId("payment-invoice")
+    expect(items[0]).toHaveTextContent(payment.invoices[0].number)
+    expect(within(items[0]).queryByTestId("payment-invoice-open")).not.toBeInTheDocument()
+    expect(within(items[1]).getByTestId("payment-invoice-open")).toBeInTheDocument()
   })
 })
 
@@ -641,43 +787,42 @@ describe("FinanceDashboard", () => {
     invoices: fx.rows,
     payments: fx.paymentRows,
     method: fx.method,
-    loadInvoiceDetail: async (id: string) => fx.detailById[id] ?? null,
-    pdfHref: (id: string) => `/client/finance/invoices/${id}/pdf`,
+    loadInvoiceDetail: loadFixtureDetail,
+    pdfHref,
+    payInvoices: async (): Promise<PayOutcome> => ({ ok: false, message: "x" }),
   }
 
   it("switches between the Invoices and Payments tabs", async () => {
     const user = userEvent.setup()
-    render(<FinanceDashboard {...base} payInvoices={async () => ({ ok: false, message: "x" })} />)
+    render(<FinanceDashboard {...base} />)
     expect(screen.getByTestId("invoice-table")).toBeInTheDocument()
     await user.click(screen.getByTestId("tab-payments"))
-    expect(await screen.findByTestId("payments-table")).toBeInTheDocument()
+    expect(await screen.findByTestId("payments-list")).toBeInTheDocument()
   })
 
-  it("keeps paid and processing invoices out of Invoices and shows their payments under Payments", async () => {
+  it("keeps paid and processing invoices out of Invoices and lists every payment under Payments", async () => {
     const user = userEvent.setup()
-    render(<FinanceDashboard {...base} invoiceHref={(id) => `/client/finance/invoices/${id}`} payInvoices={async () => ({ ok: false, message: "x" })} />)
-    const listed = within(screen.getByTestId("invoice-table")).getAllByTestId("invoice-row")
-    expect(listed).toHaveLength(unpaidRows.length)
+    render(<FinanceDashboard {...base} />)
+    expect(within(screen.getByTestId("invoice-table")).getAllByTestId("invoice-row")).toHaveLength(unpaidRows.length)
     await user.click(screen.getByTestId("tab-payments"))
-    const table = await screen.findByTestId("payments-table")
-    expect(within(table).getAllByTestId("payment-row")).toHaveLength(fx.paymentRows.length)
+    await user.click(within(await screen.findByTestId("payments-list")).getByRole("button", { name: /January 2026/ }))
+    expect(screen.getAllByTestId("payment-row")).toHaveLength(fx.paymentRows.length)
   })
 
-  it("a failed payment is not a dead end: the invoice is under Invoices and the attempt stays under Payments", async () => {
+  it("a failed payment is not a dead end: the invoice is under Invoices and the attempt, with its reason, under Payments", async () => {
     const user = userEvent.setup()
-    const failed = fx.paymentRows.find((payment) => payment.status === "failed")!
-    const covered = failed.invoices[0]
-    render(<FinanceDashboard {...base} invoiceHref={(id) => `/client/finance/invoices/${id}`} payInvoices={async () => ({ ok: false, message: "x" })} />)
-    expect(rowFor(covered.number)).toHaveAttribute("data-status", "overdue")
+    const failed = paymentById("pay_008")
+    render(<FinanceDashboard {...base} />)
+    expect(rowFor(failed.invoices[0].number)).toHaveAttribute("data-status", "overdue")
     await user.click(screen.getByTestId("tab-payments"))
-    const row = (await screen.findAllByTestId("payment-row")).find((r) => r.getAttribute("data-status") === "failed")!
-    expect(row).toHaveTextContent(covered.number)
-    expect(row).toHaveTextContent("Insufficient funds")
+    const failedSection = (await screen.findAllByTestId("list-section")).find((s) => s.getAttribute("data-section") === "failed")!
+    await user.click(within(failedSection).getByTestId("payment-open"))
+    expect(await screen.findByTestId("payment-failure")).toHaveTextContent("Insufficient funds")
   })
 
   it("View overdue jumps to the Invoices tab filtered to overdue invoices", async () => {
     const user = userEvent.setup()
-    render(<FinanceDashboard {...base} payInvoices={async () => ({ ok: false, message: "x" })} />)
+    render(<FinanceDashboard {...base} />)
     await user.click(screen.getByTestId("tab-payments"))
     await user.click(screen.getByTestId("view-overdue"))
     const table = await screen.findByTestId("invoice-table")
@@ -688,16 +833,7 @@ describe("FinanceDashboard", () => {
 
   it("shows finished empty states in both tabs with no data", async () => {
     const user = userEvent.setup()
-    render(
-      <FinanceDashboard
-        {...base}
-        summary={EMPTY_FINANCE_SUMMARY}
-        invoices={[]}
-        payments={[]}
-        method={null}
-        payInvoices={async () => ({ ok: false, message: "x" })}
-      />,
-    )
+    render(<FinanceDashboard {...base} summary={EMPTY_FINANCE_SUMMARY} invoices={[]} payments={[]} method={null} />)
     expect(screen.getByTestId("no-invoices-yet")).toBeInTheDocument()
     await user.click(screen.getByTestId("tab-payments"))
     expect(await screen.findByTestId("no-payments")).toBeInTheDocument()
@@ -718,15 +854,71 @@ describe("FinanceDashboard", () => {
     await waitFor(() => expect(screen.getByTestId("pay-selected")).toBeDisabled())
   })
 
-  it("opens the drawer from a row, and pays from it", async () => {
+  it("opens the drawer from a row, steps through the listed invoices, and pays from it", async () => {
     const user = userEvent.setup()
     const payInvoices = vi.fn(async (ids: string[]): Promise<PayOutcome> => ({ ok: true, paymentId: "p", invoiceIds: ids, totalCents: 1 }))
-    render(<FinanceDashboard {...base} invoices={firstPage} payInvoices={payInvoices} />)
-    const target = firstPage.find(isPayableRow)!
-    await user.click(within(rowFor(target.number)).getByTestId("invoice-open"))
+    render(<FinanceDashboard {...base} payInvoices={payInvoices} />)
+    await user.click(within(rowFor(unpaidRows[0].number)).getByTestId("invoice-open"))
     expect(await screen.findByTestId("invoice-drawer")).toBeInTheDocument()
+    expect(screen.getByTestId("drawer-position")).toHaveTextContent(`1 of ${unpaidRows.length}`)
+    await user.click(screen.getByRole("button", { name: "Next invoice" }))
+    expect(screen.getByTestId("drawer-number")).toHaveTextContent(unpaidRows[1].number)
     await user.click(await screen.findByTestId("drawer-pay"))
     expect(await screen.findByTestId("pay-dialog")).toBeInTheDocument()
-    expect(screen.getByTestId("pay-total")).toHaveTextContent(formatCents(target.totalCents))
+    expect(screen.queryByTestId("invoice-drawer")).not.toBeInTheDocument()
+    expect(screen.getByTestId("pay-total")).toHaveTextContent(formatCents(unpaidRows[1].totalCents))
+  })
+
+  it("opens a deep-linked unpaid invoice over the Invoices tab, stepping through the unpaid list", async () => {
+    const target = unpaidRows[2]
+    render(<FinanceDashboard {...base} linkedInvoiceId={target.id} onLinkClosed={() => {}} />)
+    expect(await screen.findByTestId("invoice-drawer")).toBeInTheDocument()
+    expect(screen.getByTestId("drawer-number")).toHaveTextContent(target.number)
+    expect(screen.getByTestId("drawer-position")).toHaveTextContent(`3 of ${unpaidRows.length}`)
+    expect(screen.getByTestId("tab-invoices")).toHaveAttribute("aria-selected", "true")
+  })
+
+  it("opens a deep-linked paid invoice on its own over the Payments tab, where it is listed", async () => {
+    const paid = byNumber("INV-2026-0005")
+    render(<FinanceDashboard {...base} linkedInvoiceId={paid.id} onLinkClosed={() => {}} />)
+    expect(await screen.findByTestId("drawer-number")).toHaveTextContent(paid.number)
+    expect(screen.queryByTestId("drawer-stepper")).not.toBeInTheDocument()
+    expect(screen.getByTestId("tab-payments")).toHaveAttribute("aria-selected", "true")
+  })
+
+  it("opens nothing for an id that is not one of the client's invoices", () => {
+    render(<FinanceDashboard {...base} linkedInvoiceId="payroll:someone_else:1" onLinkClosed={() => {}} />)
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(screen.getByTestId("tab-invoices")).toHaveAttribute("aria-selected", "true")
+  })
+
+  it("drops the link when its drawer closes, and only then", async () => {
+    const user = userEvent.setup()
+    const onLinkClosed = vi.fn()
+    const target = unpaidRows[0]
+    const { unmount } = render(<FinanceDashboard {...base} linkedInvoiceId={target.id} onLinkClosed={onLinkClosed} />)
+    await screen.findByTestId("invoice-drawer")
+    await user.click(screen.getByRole("button", { name: "Next invoice" }))
+    expect(onLinkClosed).not.toHaveBeenCalled()
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(onLinkClosed).toHaveBeenCalledTimes(1)
+    unmount()
+    onLinkClosed.mockClear()
+    render(<FinanceDashboard {...base} onLinkClosed={onLinkClosed} />)
+    await user.click(within(rowFor(target.number)).getByTestId("invoice-open"))
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(onLinkClosed).not.toHaveBeenCalled()
+  })
+
+  it("opens a new deep link while the page is open", async () => {
+    const first = unpaidRows[0]
+    const second = byNumber("INV-2026-0008")
+    const { rerender } = render(<FinanceDashboard {...base} linkedInvoiceId={first.id} onLinkClosed={() => {}} />)
+    expect(await screen.findByTestId("drawer-number")).toHaveTextContent(first.number)
+    rerender(<FinanceDashboard {...base} linkedInvoiceId={second.id} onLinkClosed={() => {}} />)
+    await waitFor(() => expect(screen.getByTestId("drawer-number")).toHaveTextContent(second.number))
+    expect(screen.getByTestId("tab-payments")).toHaveAttribute("aria-selected", "true")
   })
 })

@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { cn } from "cn"
-import { FileQuestion, ImageOff, ZoomIn, ZoomOut } from "lucide-react"
+import { ExternalLink, FileQuestion, ImageOff, ZoomIn, ZoomOut } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { formatDay } from "@/lib/format"
@@ -31,11 +31,14 @@ export function DocumentViewer({
   nowIso,
   selectedId,
   onSelect,
+  compact = false,
 }: {
   documents: UploadedDocumentView[]
   nowIso: string
   selectedId?: string
   onSelect?: (id: string) => void
+  /** Sized for the drawer: a shorter frame, and the file opens full size in its own tab instead of zooming in place. */
+  compact?: boolean
 }) {
   const [own, setOwn] = useState(documents[0]?.id ?? "")
   const [zoom, setZoom] = useState(0)
@@ -85,7 +88,18 @@ export function DocumentViewer({
         <span className="min-w-0 truncate" data-testid="viewer-caption">
           {current.fileName} · uploaded {formatDay(new Date(current.uploadedAt), now)}
         </span>
-        {!broken && current.mime !== "application/pdf" ? (
+        {!broken && compact ? (
+          <a
+            href={current.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex shrink-0 items-center gap-1 text-primary hover:underline"
+            data-testid="viewer-open"
+          >
+            Open full size
+            <ExternalLink aria-hidden className="size-3" />
+          </a>
+        ) : !broken && current.mime !== "application/pdf" ? (
           <span className="flex shrink-0 items-center gap-1">
             <Button type="button" variant="ghost" size="icon-sm" aria-label="Zoom out" disabled={zoom === 0} onClick={() => setZoom((value) => Math.max(0, value - 1))} data-testid="zoom-out">
               <ZoomOut />
@@ -98,7 +112,10 @@ export function DocumentViewer({
         ) : null}
       </div>
 
-      <div className="max-h-[32rem] min-h-64 overflow-auto rounded-lg border border-border bg-muted/30" data-testid="viewer-frame">
+      <div
+        className={cn("overflow-auto rounded-lg border border-border bg-muted/30", compact ? "max-h-72 min-h-40" : "max-h-[32rem] min-h-64")}
+        data-testid="viewer-frame"
+      >
         {broken ? (
           <div className="flex flex-col items-start gap-2 px-6 py-10" data-testid="viewer-broken">
             <ImageOff aria-hidden className="size-5 text-muted-foreground" />
@@ -108,7 +125,7 @@ export function DocumentViewer({
             </p>
           </div>
         ) : current.mime === "application/pdf" ? (
-          <iframe key={current.id} src={current.url} title={`${documentLabel(current)}: ${current.fileName}`} className="h-[32rem] w-full" data-testid="viewer-pdf" />
+          <iframe key={current.id} src={current.url} title={`${documentLabel(current)}: ${current.fileName}`} className={cn("w-full", compact ? "h-72" : "h-[32rem]")} data-testid="viewer-pdf" />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img

@@ -11,7 +11,7 @@ import { personStatusFor } from "@/domain/person-status"
 import { projectTasks } from "@/domain/tasks"
 import { DEFAULT_PEOPLE_QUERY, type PeopleQuery } from "@/lib/people-query"
 
-import { listPeople } from "../queries"
+import { listPeople, peopleCounts } from "../queries"
 import { tasksForCases } from "../tasks"
 
 const cleanups: string[] = []
@@ -85,6 +85,18 @@ describe("listPeople", () => {
     expect(flagged.every((r) => r.status === "onboarding")).toBe(true)
     expect(flagged.every((r) => /was due|has passed/.test(r.atRisk!))).toBe(true)
     expect(rows.some((r) => r.status === "onboarding" && r.atRisk === null)).toBe(true)
+  })
+
+  it("filters to exactly the people flagged at risk, and combines with the other filters", () => {
+    const db = openDb()
+    const flagged = everyone(db).rows.filter((r) => r.atRisk !== null).map((r) => r.caseId)
+    const page = everyone(db, { atRisk: true })
+    expect(page.rows.map((r) => r.caseId).sort()).toEqual([...flagged].sort())
+    expect(page.total).toBe(flagged.length)
+    expect(page.companyTotal).toBe(TOTAL)
+    const [one] = page.rows
+    expect(everyone(db, { atRisk: true, q: one.workerEmail }).rows.map((r) => r.caseId)).toEqual([one.caseId])
+    expect(everyone(db, { atRisk: true, status: "active" }).total).toBe(0)
   })
 
   it("filters by location and lists the company's locations", () => {
@@ -227,3 +239,64 @@ describe("listPeople with fixed terms", () => {
     expect(page.rows.find((r) => r.caseId === running)?.status).toBe("inactive")
   })
 })
+
+describe("listPeople for the onboarding team", () => {
+  const all = (db: AppDatabase, patch: Partial<PeopleQuery> = {}) => listPeople(db, null, q({ size: 100, ...patch }), NOW)
+
+  it("spans every client, names each person's client and offers the clients as a filter", () => {
+    const db = openDb()
+    const page = all(db)
+    expect(page.total).toBe(SEED_ROSTER.length)
+    const clients = [...new Set(page.rows.map((row) => row.clientId))]
+    expect(clients.length).toBeGreaterThan(1)
+    expect(page.clients.map((client) => client.id).sort()).toEqual([...clients].sort())
+    for (const row of page.rows) expect(row.clientName).toBeTruthy()
+  })
+
+  it("filters and sorts by client, while a client's own list ignores the client filter", () => {
+    const db = openDb()
+    const [first, second] = all(db).clients
+    const one = all(db, { client: first.id })
+    expect(one.total).toBeGreaterThan(0)
+    expect(one.rows.every((row) => row.clientId === first.id)).toBe(true)
+    const names = all(db, { sort: "client", dir: "asc" }).rows.map((row) => row.clientName.toLowerCase())
+    expect(names).toEqual([...names].sort())
+    const own = listPeople(db, SEED_IDS.client, q({ size: 100, client: second.id }), NOW)
+    expect(own.total).toBe(TOTAL)
+    expect(own.clients).toEqual([])
+  })
+
+  it("filters at-risk people across clients, and within the chosen client", () => {
+    const db = openDb()
+    const flagged = all(db).rows.filter((row) => row.atRisk !== null)
+    expect(all(db, { atRisk: true }).rows.map((row) => row.caseId).sort()).toEqual(flagged.map((row) => row.caseId).sort())
+    const client = flagged[0].clientId
+    const within = all(db, { atRisk: true, client })
+    expect(within.total).toBe(flagged.filter((row) => row.clientId === client).length)
+  })
+})
+
+describe("peopleCounts", () => {
+  const COMPANIES = [SEED_IDS.client, SEED_IDS.client2, SEED_IDS.client3]
+
+  it("counts exactly the people the list shows under status=onboarding and atRisk=1, for every company", () => {
+    const db = openDb()
+    for (const company of COMPANIES) {
+      const counts = peopleCounts(db, company, NOW)
+      expect(counts.onboarding, company).toBe(listPeople(db, company, q({ status: "onboarding" }), NOW).total)
+      expect(counts.atRisk, company).toBe(listPeople(db, company, q({ atRisk: true }), NOW).total)
+    }
+  })
+
+  it("has onboarding people for the seeded client, some but not all of them at risk", () => {
+    const db = openDb()
+    const counts = peopleCounts(db, SEED_IDS.client, NOW)
+    expect(counts.atRisk).toBeGreaterThan(0)
+    expect(counts.onboarding).toBeGreaterThan(counts.atRisk)
+  })
+
+  it("counts nobody for a company with no people", () => {
+    expect(peopleCounts(openDb(), "client_other", NOW)).toEqual({ onboarding: 0, atRisk: 0 })
+  })
+})
+

@@ -8,11 +8,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { SessionUser } from "@/auth"
 import { SEED_IDS, formSubmissions, generatedDocuments } from "@/db"
-import type { I9Section2Data } from "@/domain/forms"
+import { toI9Document } from "@/domain/forms"
 import { DEFAULT_HANDLERS } from "@/domain/tasks"
 import { TASK_UI_REGISTRY } from "@/lib/task-ui-registry"
 import { DEDICATED_COMPLETION_TYPES } from "@/server/dedicated-task-types"
-import { sessionUser, setup, tempDbFactory } from "@/server/__tests__/helpers"
+import { SAMPLE_IDENTITY_DETAILS, sessionUser, setup, tempDbFactory } from "@/server/__tests__/helpers"
 import { tasksForCase } from "@/server/tasks"
 
 import { acceptSection2, handlerPayload, prepareSection2 } from "../i9-review"
@@ -49,19 +49,7 @@ afterEach(() => {
   fs.rmSync(uploadsDir, { recursive: true, force: true })
 })
 
-const section2: I9Section2Data = {
-  listA: [{ title: "U.S. Passport", issuingAuthority: "U.S. Department of State", number: "123456789", expiresOn: "2031-05-01" }],
-  listB: null,
-  listC: null,
-  additionalInformation: "",
-  alternativeProcedure: false,
-  firstDayOfEmployment: "2026-03-02",
-  employerRepFirstName: "Sam",
-  employerRepLastName: "Ortiz",
-  employerRepTitle: "Onboarding Specialist",
-  businessName: "Northwind EOR, Inc.",
-  businessAddress: { street: "500 Harbor Way, Suite 400", city: "San Francisco", state: "CA", zip: "94105" },
-}
+const section2 = { listA: [toI9Document(SAMPLE_IDENTITY_DETAILS.list_a)], listB: null, listC: null }
 
 const HELD_BACK = "Check the details you entered."
 const OWN_FORM = /finished from its own form/
@@ -97,12 +85,11 @@ describe("verify_i9_section2 finishes only from the Section 2 screen", () => {
     ctx.driver.drive({ stop: ["verify_i9_section2", "setup_payroll", "go_live", "file_new_hire_report", "submit_benefit_enrollments"] })
     const task = ctx.driver.find("verify_i9_section2")!
 
-    const prepared = await prepareSection2(ctx.deps, specialist, { taskId: task.id, data: section2 })
+    const prepared = await prepareSection2(ctx.deps, specialist, { taskId: task.id })
     const field = prepared.fields.find((candidate) => candidate.kind === "signature")!
     const now = ctx.clock.now
     await acceptSection2(ctx.deps, specialist, {
       taskId: task.id,
-      data: section2,
       signature: { typedName: "Sam Ortiz", consentedAt: new Date(now.getTime() - 60_000).toISOString() },
       fieldValues: { [field.id]: { kind: "signature", value: "Sam Ortiz", signedAt: now.toISOString() } },
     })
@@ -118,12 +105,11 @@ describe("the other specialist tasks need what their screens collect", () => {
     const { ctx, specialist, status } = atStart()
     ctx.driver.drive({ stop: ["verify_i9_section2", "setup_payroll", "go_live", "file_new_hire_report", "submit_benefit_enrollments"] })
     const verify = ctx.driver.find("verify_i9_section2")!
-    const prepared = await prepareSection2(ctx.deps, specialist, { taskId: verify.id, data: section2 })
+    const prepared = await prepareSection2(ctx.deps, specialist, { taskId: verify.id })
     const field = prepared.fields.find((candidate) => candidate.kind === "signature")!
     const now = ctx.clock.now
     await acceptSection2(ctx.deps, specialist, {
       taskId: verify.id,
-      data: section2,
       signature: { typedName: "Sam Ortiz", consentedAt: new Date(now.getTime() - 60_000).toISOString() },
       fieldValues: { [field.id]: { kind: "signature", value: "Sam Ortiz", signedAt: now.toISOString() } },
     })

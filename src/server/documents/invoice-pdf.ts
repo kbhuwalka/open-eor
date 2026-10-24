@@ -2,11 +2,10 @@
  * Northwind EOR invoice PDF. Pure: plain data in, bytes out, no database or clock reads beyond the
  * optional `now`. Every amount is printed from integer cents; the PDF never recomputes billing.
  *
- * It is the invoice page (`InvoiceDocument`) on paper: the same sections in the same order, the
- * same wording (lines, groups, proration and the amount due come from `src/lib/invoice-lines.ts`,
- * shared with the page), set in Geist with tabular figures and the neutral palette of the design
- * tokens (`src/app/globals.css`). The page's buttons are not part of the document. See
- * docs/invoice-and-payslip-pdfs.md.
+ * It is `InvoiceDocument` on paper: the same sections in the same order, the same wording (lines,
+ * groups, proration and the amount due come from `src/lib/invoice-lines.ts`, shared with the
+ * invoice drawer), set in Geist with tabular figures and the neutral palette of the design tokens
+ * (`src/app/globals.css`). See docs/invoice-and-payslip-pdfs.md.
  */
 
 import { rgb, type PDFPage, type RGB } from "pdf-lib"

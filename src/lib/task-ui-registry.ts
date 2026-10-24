@@ -48,6 +48,14 @@ export function portalForRole(role: UserRole): Portal {
   }
 }
 
+/**
+ * A portal's home, where a person lands when no task is left and where the "done" notice shows:
+ * the client's Home, the employee's to-do list, the specialist's inbox and the Finance Home.
+ */
+export function portalHomeHref(portal: Portal): string {
+  return `/${portal}`
+}
+
 /** The portal where each party works; `system` works nowhere. */
 export function portalForParty(party: TaskParty): Portal | null {
   switch (party) {
@@ -103,7 +111,14 @@ export type TaskUiEntry = {
   rejectable?: boolean
 }
 
+/**
+ * Where a task is worked from in `portal`. The specialist does tasks in the Home's drawer, so a
+ * specialist task opens it. Finance has no task page: its work is settling payments, so every
+ * Finance task points at Payments. The client and the employee have a task page.
+ */
 export function taskPageHref(task: Pick<TaskUiSubject, "id">, portal: Portal): string {
+  if (portal === "onboarding") return `/onboarding?open=${task.id}`
+  if (portal === "finance") return "/finance/payments"
   return `/${portal}/tasks/${task.id}`
 }
 
@@ -160,7 +175,7 @@ export const TASK_UI_REGISTRY: Readonly<Record<string, TaskUiEntry>> = {
     surface: "page",
     portals: ["finance"],
     action: "Confirm deposit",
-    href: () => "/finance/deposits",
+    href: () => "/finance/payments",
     detail: (task) => {
       const amount = amountOf(task)
       return amount === null ? null : `Deposit of ${formatCents(amount)}`

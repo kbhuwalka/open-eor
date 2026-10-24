@@ -51,6 +51,14 @@
   --color-status-success-foreground: var(--status-success-foreground);
   --color-signing: var(--signing);
   --color-signing-foreground: var(--signing-foreground);
+  --color-chart-brand: var(--chart-brand);
+  --color-chart-positive: var(--chart-positive);
+  --color-chart-neutral: var(--chart-neutral);
+  --color-chart-caution: var(--chart-caution);
+  --color-chart-alert: var(--chart-alert);
+  --color-chart-critical: var(--chart-critical);
+  --color-chart-pending: var(--chart-pending);
+  --color-chart-hatch: var(--chart-hatch);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -151,6 +159,31 @@
   --status-success-foreground: oklch(0.8 0.12 150);
   --signing: oklch(0.86 0.16 95);
   --signing-foreground: oklch(0.22 0.05 80);
+}
+
+/*
+ * Chart tokens (ui-guidelines §5.8) are derived from the surface, primary and status tokens, so
+ * they are declared again on every element that redefines those: `.dark` and each preset's
+ * `[data-theme]` wrapper. Declared on `:root` alone they would keep the default preset's colours.
+ */
+:root,
+.dark,
+[data-theme] {
+  --chart-brand: var(--primary);
+  --chart-positive: var(--status-success-foreground);
+  --chart-neutral: color-mix(in oklch, var(--muted-foreground) 45%, var(--card));
+  --chart-caution: var(--status-warning-foreground);
+  --chart-alert: var(--status-danger-foreground);
+  --chart-critical: color-mix(in oklch, var(--status-danger-foreground) 70%, var(--foreground));
+  --chart-pending: var(--muted);
+  --chart-hatch: color-mix(in oklch, var(--muted-foreground) 55%, var(--muted));
+}
+
+/* On dark surfaces the danger foreground is light, so the 60+ bucket deepens toward the danger
+   background instead of toward the (light) foreground, keeping it the heaviest red. */
+.dark,
+.dark[data-theme] {
+  --chart-critical: color-mix(in oklch, var(--status-danger-foreground) 55%, var(--status-danger));
 }
 
 @layer base {

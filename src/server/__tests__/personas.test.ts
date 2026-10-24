@@ -11,21 +11,28 @@ import {
   hireRequests,
   onboardingCases,
   roles,
+  SEED_IDS,
   tasks,
   templateRowId,
   users,
   type AppDatabase,
+  type UserRole,
 } from "@/db"
 import { DEFAULT_WORKFLOW, type Task } from "@/domain/tasks"
 
 import { taskToValues } from "../task-store"
 import {
+  compareClientPersonas,
   countEmployees,
   EMPLOYEE_SEARCH_DEFAULT_LIMIT,
   EMPLOYEE_SEARCH_MAX_LIMIT,
   findEmployee,
-  listNonEmployeePersonas,
+  listPickerPersonas,
+  listRecentlyStartedEmployees,
+  personaOf,
+  RECENT_EMPLOYEES_LIMIT,
   searchEmployees,
+  type ClientPersona,
 } from "../personas"
 
 const cleanups: string[] = []
@@ -83,7 +90,7 @@ function addCase(
   db: AppDatabase,
   workerId: string,
   shape: CaseShape,
-  opts: { endDate?: string | null; updatedAt?: Date } = {}
+  opts: { endDate?: string | null; updatedAt?: Date; startDate?: string } = {}
 ) {
   const company = firstCompany(db)
   const role = db.select().from(roles).limit(1).get()
@@ -102,7 +109,7 @@ function addCase(
       wageCents: 9_000_000,
       wageUnit: "annual",
       stateCode: "CA",
-      startDate: "2026-01-05",
+      startDate: opts.startDate ?? "2026-01-05",
       endDate: opts.endDate ?? null,
       createdAt: NOW,
     })
@@ -153,35 +160,157 @@ function addCase(
   }
 }
 
-describe("listNonEmployeePersonas", () => {
-  it("returns every non-worker user and no worker, grouped client HR, onboarding specialists, Finance", () => {
-    const db = openDb()
-    const all = db.select().from(users).all()
-    const expected = all.filter((u) => u.role !== "worker").map((u) => u.id).sort()
-    const personas = listNonEmployeePersonas(db)
-    expect(personas.map((p) => p.id).sort()).toEqual(expected)
-    expect(personas.some((p) => (p.role as string) === "worker")).toBe(false)
+function addUser(
+  db: AppDatabase,
+  n: { id: string; name: string; role: "client_hr" | "onboarding_specialist" | "finance"; companyId?: string }
+) {
+  const staff = n.role !== "client_hr"
+  db.insert(users)
+    .values({
+      id: n.id,
+      role: n.role,
+      displayName: n.name,
+      email: `${n.id}@x.example`,
+      clientCompanyId: staff ? null : (n.companyId ?? firstCompany(db).id),
+      providerId: staff ? SEED_IDS.provider : null,
+      createdAt: NOW,
+    })
+    .run()
+}
 
-    const order = ["client_hr", "onboarding_specialist", "finance"]
-    const ranks = personas.map((p) => order.indexOf(p.role))
-    expect([...ranks].sort((a, b) => a - b)).toEqual(ranks)
+describe("listPickerPersonas", () => {
+  it("groups the seeded client HR users by company and the Northwind staff, with no employees", () => {
+    const db = openDb()
+    const { clients, northwind } = listPickerPersonas(db)
+    expect(clients).toEqual([
+      { kind: "client", id: SEED_IDS.users.clientHr, displayName: "Alex Harper", companyName: "Acme Robotics" },
+      { kind: "client", id: SEED_IDS.users.clientHr2, displayName: "Priya Raman", companyName: "Brightwave Labs" },
+      { kind: "client", id: SEED_IDS.users.clientHr3, displayName: "Marcus Hale", companyName: "Harbor Foods Co." },
+    ])
+    expect(northwind).toEqual([
+      { kind: "staff", id: SEED_IDS.users.specialist, displayName: "Sam Ortiz", role: "onboarding_specialist" },
+      { kind: "staff", id: SEED_IDS.users.finance, displayName: "Morgan Reyes", role: "finance" },
+    ])
+    const nonWorkers = db.select().from(users).all().filter((u) => u.role !== "worker").map((u) => u.id)
+    expect([...clients, ...northwind].map((p) => p.id).sort()).toEqual(nonWorkers.sort())
   })
 
-  it("picks up a newly added non-worker user", () => {
+  it("orders clients alphabetically by company, whatever the person or insertion order", () => {
     const db = openDb()
-    const company = firstCompany(db)
-    db.insert(users)
-      .values({
-        id: "user_hr_extra",
-        role: "client_hr",
-        displayName: "Casey Extra",
-        email: "casey@extra.example",
-        clientCompanyId: company.id,
-        providerId: null,
-        createdAt: NOW,
-      })
-      .run()
-    expect(listNonEmployeePersonas(db).map((p) => p.id)).toContain("user_hr_extra")
+    addCompany(db, "company_aardvark", "aardvark Freight")
+    addCompany(db, "company_zulu", "Zulu Media")
+    addUser(db, { id: "hr_zulu", name: "Aaron First", role: "client_hr", companyId: "company_zulu" })
+    addUser(db, { id: "hr_aardvark", name: "Zoe Last", role: "client_hr", companyId: "company_aardvark" })
+    expect(listPickerPersonas(db).clients.map((p) => p.companyName)).toEqual([
+      "aardvark Freight",
+      "Acme Robotics",
+      "Brightwave Labs",
+      "Harbor Foods Co.",
+      "Zulu Media",
+    ])
+  })
+
+  it("lists two HR users of one company by person name", () => {
+    const db = openDb()
+    addUser(db, { id: "hr_acme_2", name: "Aaron Acme", role: "client_hr", companyId: SEED_IDS.client })
+    const { clients } = listPickerPersonas(db)
+    expect(clients.slice(0, 2).map((p) => p.id)).toEqual(["hr_acme_2", SEED_IDS.users.clientHr])
+  })
+
+  it("sorts a client HR user without a company after every company", () => {
+    const client = (id: string, displayName: string, companyName: string | null): ClientPersona => ({
+      kind: "client",
+      id,
+      displayName,
+      companyName,
+    })
+    const sorted = [
+      client("c_none_b", "Blair Loose", null),
+      client("c_zulu", "Aaron Zulu", "Zulu Media"),
+      client("c_none_a", "Avery Loose", null),
+      client("c_acme", "Zoe Acme", "acme"),
+    ].sort(compareClientPersonas)
+    expect(sorted.map((c) => c.id)).toEqual(["c_acme", "c_zulu", "c_none_a", "c_none_b"])
+  })
+
+  it("puts every specialist before Finance, each by name", () => {
+    const db = openDb()
+    addUser(db, { id: "fin_extra", name: "Avery Ledger", role: "finance" })
+    addUser(db, { id: "spec_extra", name: "Zane Queue", role: "onboarding_specialist" })
+    expect(listPickerPersonas(db).northwind.map((p) => p.id)).toEqual([
+      SEED_IDS.users.specialist,
+      "spec_extra",
+      "fin_extra",
+      SEED_IDS.users.finance,
+    ])
+  })
+})
+
+describe("personaOf", () => {
+  it("reads a client user's and an employee's company, and none for staff or a dangling company", () => {
+    const db = openDb()
+    const byId = new Map(db.select().from(users).all().map((u) => [u.id, u]))
+    const of = (id: string) => {
+      const user = byId.get(id)
+      if (!user) throw new Error(`no user ${id}`)
+      return personaOf(db, { ...user, role: user.role as UserRole })
+    }
+    expect(of(SEED_IDS.users.clientHr2)).toEqual({
+      kind: "client",
+      id: SEED_IDS.users.clientHr2,
+      displayName: "Priya Raman",
+      companyName: "Brightwave Labs",
+    })
+    expect(of(SEED_IDS.users.worker)).toMatchObject({ kind: "employee", displayName: "Jordan Lee", companyName: "Acme Robotics" })
+    expect(of(SEED_IDS.users.finance)).toEqual({
+      kind: "staff",
+      id: SEED_IDS.users.finance,
+      displayName: "Morgan Reyes",
+      role: "finance",
+    })
+    expect(
+      personaOf(db, { id: "x", displayName: "Gone Co", role: "client_hr", clientCompanyId: "company_missing" })
+    ).toEqual({ kind: "client", id: "x", displayName: "Gone Co", companyName: null })
+  })
+})
+
+describe("listRecentlyStartedEmployees", () => {
+  /** Later than every seeded start date, so the employees added here are the most recent. */
+  const LATER = new Date("2030-01-15T12:00:00Z")
+  const day = (n: number) => new Date(LATER.getTime() + n * 86_400_000).toISOString().slice(0, 10)
+
+  it("returns live employees, newest start date first, capped at the limit", () => {
+    const db = openDb()
+    addCompany(db, "company_zeta", "Zeta Quasar Labs")
+    for (const [id, start] of [["w_old", -40], ["w_new", -2], ["w_mid", -10]] as const) {
+      addWorker(db, { id, name: id, email: `${id}@x.example`, companyId: "company_zeta" })
+      addCase(db, id, "live", { startDate: day(start) })
+    }
+    addWorker(db, { id: "w_onb", name: "Onboarding Owen", email: "owen@x.example" })
+    addCase(db, "w_onb", "onboarding", { startDate: day(-1) })
+    addWorker(db, { id: "w_future", name: "Future Fay", email: "fay@x.example" })
+    addCase(db, "w_future", "live", { startDate: day(5) })
+
+    const recent = listRecentlyStartedEmployees(db, 10, LATER)
+    expect(recent.slice(0, 3).map((e) => e.id)).toEqual(["w_new", "w_mid", "w_old"])
+    expect(recent.map((e) => e.id)).not.toContain("w_onb")
+    expect(recent.map((e) => e.id)).not.toContain("w_future")
+    expect(recent[0]).toEqual({ id: "w_new", displayName: "w_new", companyName: "Zeta Quasar Labs", startDate: day(-2) })
+    expect(listRecentlyStartedEmployees(db, 2, LATER).map((e) => e.id)).toEqual(["w_new", "w_mid"])
+    expect(listRecentlyStartedEmployees(db, undefined, LATER)).toHaveLength(RECENT_EMPLOYEES_LIMIT)
+  })
+
+  it("leaves out a terminated case and lists a person with two live cases once", () => {
+    const db = openDb()
+    addWorker(db, { id: "w_term", name: "Tess Term", email: "tess@x.example" })
+    addCase(db, "w_term", "terminated", { startDate: day(-1) })
+    addWorker(db, { id: "w_re", name: "Rae Rehired", email: "rae@x.example" })
+    addCase(db, "w_re", "live", { startDate: day(-3), updatedAt: new Date(LATER.getTime() - 1000) })
+    addCase(db, "w_re", "live", { startDate: day(-30), updatedAt: new Date(LATER.getTime() - 2000) })
+    const ids = listRecentlyStartedEmployees(db, 100, LATER).map((e) => e.id)
+    expect(ids).not.toContain("w_term")
+    expect(ids.filter((id) => id === "w_re")).toHaveLength(1)
+    expect(new Set(ids).size).toBe(ids.length)
   })
 })
 

@@ -1,30 +1,16 @@
 "use client"
 
-import { useEffect, useState, type ComponentProps } from "react"
+import type { ComponentProps } from "react"
 
 import { SignDocumentButton, type SigningDocumentSource, type SigningResult } from "@/components/signing"
 import { Button } from "@/components/ui/button"
-import type { SignatureField } from "@/domain/forms"
 import type { ActionResult } from "@/server/action-result"
 import type { SignedMasterAgreement } from "@/server/master-agreement"
 
-import { prepareMasterAgreement, type AgreementSignatureInput } from "./actions"
-
-type Prepared = {
-  document: SigningDocumentSource
-  fields: SignatureField[]
-  title: string
-  signer: { name: string; role: string }
-}
+import type { AgreementSignatureInput } from "./actions"
+import { usePreparedAgreement } from "./use-prepared-agreement"
 
 const EMPTY_DOCUMENT: SigningDocumentSource = { pdfBytes: new Uint8Array() }
-
-function fromBase64(value: string): Uint8Array {
-  const binary = atob(value)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
-  return bytes
-}
 
 /**
  * "Review and sign" for the company's master EOR agreement. The server regenerates the document and
@@ -41,39 +27,7 @@ export function AgreementSignButton({
   sign: (input: AgreementSignatureInput) => Promise<ActionResult<SignedMasterAgreement>>
   onSigned: (signed: SignedMasterAgreement | null) => void
 } & Pick<ComponentProps<typeof Button>, "size" | "variant" | "children" | "className">) {
-  const [prepared, setPrepared] = useState<Prepared | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [attempt, setAttempt] = useState(0)
-
-  useEffect(() => {
-    let cancelled = false
-    void prepareMasterAgreement().then(
-      (result) => {
-        if (cancelled) return
-        if (result.ok) {
-          setError(null)
-          setPrepared({
-            document: { pdfBytes: fromBase64(result.data.pdf) },
-            fields: result.data.fields,
-            title: result.data.title,
-            signer: result.data.signer,
-          })
-        } else if (result.code === "AGREEMENT_ALREADY_SIGNED") {
-          onSigned(null)
-        } else {
-          setError(result.message)
-        }
-      },
-      () => {
-        if (!cancelled) setError("The agreement could not be prepared. Try again.")
-      }
-    )
-    return () => {
-      cancelled = true
-    }
-    // `onSigned` is a fresh closure each render; preparing again for it would loop.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attempt])
+  const { prepared, error, retry } = usePreparedAgreement(true, () => onSigned(null))
 
   if (error) {
     return (
@@ -85,10 +39,7 @@ export function AgreementSignButton({
           type="button"
           variant="outline"
           size={buttonProps.size}
-          onClick={() => {
-            setError(null)
-            setAttempt((n) => n + 1)
-          }}
+          onClick={retry}
         >
           Try again
         </Button>

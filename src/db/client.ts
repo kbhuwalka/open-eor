@@ -143,7 +143,11 @@ function applySchema(sqlite: Database.Database): void {
       storage_path TEXT NOT NULL,
       file_name TEXT NOT NULL,
       uploaded_by TEXT NOT NULL REFERENCES users(id),
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      document_title TEXT,
+      issuing_authority TEXT,
+      document_number_encrypted TEXT,
+      expires_on TEXT
     );
     CREATE INDEX IF NOT EXISTS case_documents_case_kind_created_idx
       ON case_documents (case_id, kind, created_at);
@@ -380,6 +384,10 @@ function applySchema(sqlite: Database.Database): void {
   ensureColumn(sqlite, "client_companies", "csm_name", "TEXT")
   ensureColumn(sqlite, "client_companies", "csm_email", "TEXT")
   ensureColumn(sqlite, "payments", "failed_at", "INTEGER")
+  ensureColumn(sqlite, "case_documents", "document_title", "TEXT")
+  ensureColumn(sqlite, "case_documents", "issuing_authority", "TEXT")
+  ensureColumn(sqlite, "case_documents", "document_number_encrypted", "TEXT")
+  ensureColumn(sqlite, "case_documents", "expires_on", "TEXT")
   // Failed payments used to keep their failure time in settled_at.
   sqlite.exec(
     "UPDATE payments SET failed_at = settled_at, settled_at = NULL WHERE status = 'failed' AND failed_at IS NULL AND settled_at IS NOT NULL",

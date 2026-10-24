@@ -1,12 +1,13 @@
 /**
  * The "Verify I-9 Section 2" task (onboarding-portal.md §3).
  *
- * Reading: the employee's active uploads (one per kind), what they told us in Section 1, the
- * checklist and the earlier rejections. Writing, accepted: the specialist records the documents they
- * examined, the server fills Section 2 on the employee's signed Section 1 (or the blank official
- * form), takes the employer representative's typed e-signature at the generator's own rectangle,
- * verifies the result, stores the bytes encrypted and records the hash, all in the transaction that
- * completes the task. Rejecting goes through the shared `rejectTaskAction` (engine rework).
+ * Reading: the employee's active uploads (one per kind) with the details they entered at upload,
+ * what they told us in Section 1 and the earlier rejections. Writing, accepted: the server fills
+ * Section 2 from the employee's stored entries (the specialist reviews them and cannot change
+ * them) on the employee's signed Section 1 (or the blank official form), takes the employer
+ * representative's typed e-signature at the generator's own rectangle, verifies the result, stores
+ * the bytes encrypted and records the hash, all in the transaction that completes the task.
+ * Rejecting goes through the shared `rejectTaskAction` (engine rework).
  */
 import { and, desc, eq } from "drizzle-orm"
 
@@ -16,20 +17,21 @@ import { caseDocuments, documentSignatures, generatedDocuments, users } from "@/
 import { todayIso } from "@/domain/employment-term"
 import {
   hasErrors,
-  i9ListKinds,
+  reviewedDocumentNumber,
+  section2Readiness,
   validateI9Section2,
   type I9Document,
   type I9Section2Data,
-  type I9Section2Draft,
+  type IdentityListKind,
+  type Section2Readiness,
   type SignatureField,
 } from "@/domain/forms"
 import { DomainError, type DocumentKind } from "@/domain/types"
-import { isWorkAuthListComboValid, selectActiveIdentityDocuments } from "@/domain/work-auth"
+import { selectActiveIdentityDocuments } from "@/domain/work-auth"
 import {
-  i9Checklist,
   rejectionHistory,
-  type ChecklistItem,
   type RejectionHistoryEntry,
+  type ReviewedDocumentView,
   type UploadedDocumentView,
 } from "@/lib/onboarding-portal/i9-review"
 
@@ -42,6 +44,7 @@ import {
   fillI9Section2,
   verifySignedDocument,
 } from "../documents"
+import { identityDetailsOf } from "../identity-documents"
 import { tasksForCase } from "../tasks"
 import { readSignedFile, readStoredFile, removeStoredFile, sniffUploadType, writeSignedFile } from "../uploads"
 
@@ -64,16 +67,12 @@ export type I9ReviewData = {
   rejectable: boolean
   done: boolean
   person: string
-  /** Active uploads, one per kind, in List A, B, C order. */
-  documents: UploadedDocumentView[]
-  /** Earlier uploads that a newer one replaced. */
-  replaced: UploadedDocumentView[]
-  /** The combination the active uploads make is valid (List A, or B with C). */
-  comboValid: boolean
+  /** Active uploads, one per kind, in List A, B, C order, with what the employee entered. */
+  documents: ReviewedDocumentView[]
+  /** Whether Section 2 can be signed from the employee's entries as they stand; else only Send back. */
+  readiness: Section2Readiness["state"]
   section1: I9Section1Summary
-  checklist: ChecklistItem[]
   history: RejectionHistoryEntry[]
-  prefill: I9Section2Draft
   signerName: string
   today: string
   /** The recorded Section 2 documents of a done task. */
@@ -128,14 +127,14 @@ function splitName(displayName: string): { first: string; last: string } {
   return { first: parts[0] ?? "", last: parts.slice(1).join(" ") || (parts[0] ?? "") }
 }
 
-const BLANK_DOCUMENT = { title: "", issuingAuthority: "", number: "", expiresOn: "" }
+export type Section2EmployerPart = Omit<I9Section2Data, "listA" | "listB" | "listC">
 
-/** Section 2 defaults that are the same for every hire; the specialist fills in the documents. */
-export function section2Prefill(input: { startDate: string | null; signerName: string; kinds?: readonly DocumentKind[] }): I9Section2Draft {
+/** The employer half of Section 2: the hire's start date, the signing specialist and Northwind. */
+export function section2Employer(input: { startDate: string | null; signerName: string }): Section2EmployerPart {
   const { first, last } = splitName(input.signerName)
-  const usesListBC = Boolean(input.kinds?.includes("list_b") || input.kinds?.includes("list_c")) && !input.kinds?.includes("list_a")
   return {
-    ...(usesListBC ? { listB: BLANK_DOCUMENT, listC: BLANK_DOCUMENT } : {}),
+    additionalInformation: "",
+    alternativeProcedure: false,
     firstDayOfEmployment: input.startDate ?? "",
     employerRepFirstName: first,
     employerRepLastName: last,
@@ -162,25 +161,14 @@ export function loadI9Review(
   const found = loadStaffTask(db, viewer, taskId, ["verify_i9_section2"], now)
   if (!found) return null
   const { basics, page, task } = found
-
-  const rows = db
-    .select()
-    .from(caseDocuments)
-    .where(eq(caseDocuments.caseId, basics.caseId))
-    .all()
-    .filter((row) => row.kind !== "w4" && row.kind !== "other")
-  const withTime = rows.map((row) => ({ ...row, createdAtMs: row.createdAt.getTime() }))
-  const active = selectActiveIdentityDocuments(withTime.map((row) => ({ id: row.id, kind: row.kind as DocumentKind, createdAt: row.createdAtMs })))
-  const activeIds = new Set(active.map((doc) => doc.id))
-  const view = (row: (typeof withTime)[number]) => uploadView({ ...row, kind: row.kind as DocumentKind })
-  const documents = active.flatMap((doc) => {
-    const row = withTime.find((candidate) => candidate.id === doc.id)
-    return row ? [view(row)] : []
-  })
-  const replaced = withTime
-    .filter((row) => !activeIds.has(row.id))
-    .sort((a, b) => b.createdAtMs - a.createdAtMs)
-    .map(view)
+  const today = todayIso(now)
+  const done = task.status === "done"
+  const uploads = activeUploads(db, basics.caseId)
+  const canSign = page.canAct && !done
+  const documents: ReviewedDocumentView[] = uploads.map(({ row, details }) => ({
+    ...uploadView(row),
+    details: details && { ...details, number: reviewedDocumentNumber(details, canSign) },
+  }))
 
   const allTasks = tasksForCase(db, basics.caseId)
   const names = new Map(
@@ -203,7 +191,7 @@ export function loadI9Review(
 
   const verified = latestForm(db, basics.caseId, "i9_section2")
   const verifiedAs =
-    task.status === "done" && verified
+    done && verified
       ? {
           title: String(verified.data.documentTitle ?? ""),
           authority: String(verified.data.issuingAuthority ?? ""),
@@ -216,19 +204,41 @@ export function loadI9Review(
     caseId: basics.caseId,
     canAct: page.canAct,
     rejectable: page.rejectable,
-    done: task.status === "done",
+    done,
     person: basics.workerName,
     documents,
-    replaced,
-    comboValid: isWorkAuthListComboValid(documents.map((doc) => doc.kind)),
+    readiness: section2Readiness(uploads.map(reviewed), today).state,
     section1: section1Summary(db, basics.caseId),
-    checklist: i9Checklist(documents.map((doc) => doc.kind)),
     history,
-    prefill: section2Prefill({ startDate: basics.startDate, signerName: viewer.displayName, kinds: documents.map((doc) => doc.kind) }),
     signerName: viewer.displayName,
-    today: todayIso(now),
+    today,
     verifiedAs,
   }
+}
+
+type ActiveUpload = {
+  row: typeof caseDocuments.$inferSelect & { kind: IdentityListKind }
+  details: ReturnType<typeof identityDetailsOf>
+}
+
+/** The case's active List A/B/C uploads (one per kind, newest wins) with the employee's entries. */
+function activeUploads(db: AppDatabase, caseId: string): ActiveUpload[] {
+  const rows = db.select().from(caseDocuments).where(eq(caseDocuments.caseId, caseId)).all()
+  const active = selectActiveIdentityDocuments(
+    rows.map((row) => ({ id: row.id, kind: row.kind as DocumentKind, createdAt: row.createdAt.getTime() })),
+  )
+  return active.flatMap((doc) => {
+    const row = rows.find((candidate) => candidate.id === doc.id)
+    if (!row || (row.kind !== "list_a" && row.kind !== "list_b" && row.kind !== "list_c")) return []
+    return [{ row: { ...row, kind: row.kind }, details: identityDetailsOf(row) }]
+  })
+}
+
+const reviewed = ({ row, details }: ActiveUpload) => ({ id: row.id, kind: row.kind, details })
+
+/** The Section 2 document lists from the employee's stored entries, as of `today`. */
+export function storedSection2Documents(db: AppDatabase, caseId: string, today: string): Section2Readiness {
+  return section2Readiness(activeUploads(db, caseId).map(reviewed), today)
 }
 
 // ── Accepting: fill, sign, store, complete ──────────────────────────
@@ -263,25 +273,32 @@ function requireReadyTask(deps: CaseServiceDeps, user: StaffViewer, taskId: stri
   return found
 }
 
-function activeUploadKinds(db: AppDatabase, caseId: string): DocumentKind[] {
-  const rows = db.select().from(caseDocuments).where(eq(caseDocuments.caseId, caseId)).all()
-  return selectActiveIdentityDocuments(rows.map((row) => ({ id: row.id, kind: row.kind as DocumentKind, createdAt: row.createdAt.getTime() })))
-    .map((doc) => doc.kind)
-    .filter((kind) => kind === "list_a" || kind === "list_b" || kind === "list_c")
+const NOT_READY: Record<Exclude<Section2Readiness["state"], "ready">, string> = {
+  no_documents: "The employee has not uploaded their documents yet.",
+  invalid_combo: "These uploads are not an acceptable combination. Send them back.",
+  missing_details: "The employee has not entered the details of every document. Send them back to upload again.",
+  expired: "A document has expired. Send it back.",
 }
 
-/** The checks that tie what the specialist typed to what the employee uploaded. */
-function validateAgainstUploads(db: AppDatabase, caseId: string, data: I9Section2Data, today: string): void {
-  const errors = validateI9Section2(data, { today })
-  if (hasErrors(errors)) throw new I9InputError("Check the form and try again.", errors)
-  const uploaded = [...activeUploadKinds(db, caseId)].sort().join(",")
-  const recorded = [...i9ListKinds(data)].sort().join(",")
-  if (uploaded !== recorded) {
-    throw new I9InputError(
-      "The documents recorded do not match the ones the employee uploaded. Record the same lists, or send the documents back.",
-      { documents: "Record the same lists the employee uploaded." },
-    )
+/**
+ * Section 2 as it will be signed: the documents exactly as the employee entered them, the employer
+ * half from the hire and the signing specialist. Refused when the entries cannot go on the form.
+ */
+function section2DataFor(deps: CaseServiceDeps, owned: Owned, signerName: string): I9Section2Data {
+  const today = todayIso(deps.now())
+  const readiness = storedSection2Documents(deps.db, owned.basics.caseId, today)
+  if (readiness.state !== "ready") throw new I9InputError(NOT_READY[readiness.state])
+  const data: I9Section2Data = {
+    listA: readiness.listA,
+    listB: readiness.listB,
+    listC: readiness.listC,
+    ...section2Employer({ startDate: owned.basics.startDate, signerName }),
   }
+  const errors = validateI9Section2(data, { today })
+  if (hasErrors(errors)) {
+    throw new I9InputError("Section 2 cannot be filled from what the employee entered. Send the documents back.", errors)
+  }
+  return data
 }
 
 async function baseForSection2(db: AppDatabase, caseId: string): Promise<Uint8Array | undefined> {
@@ -295,20 +312,18 @@ async function baseForSection2(db: AppDatabase, caseId: string): Promise<Uint8Ar
 }
 
 async function generateSection2(deps: CaseServiceDeps, owned: Owned, data: I9Section2Data) {
-  const today = todayIso(deps.now())
-  validateAgainstUploads(deps.db, owned.basics.caseId, data, today)
   const base = await baseForSection2(deps.db, owned.basics.caseId)
-  return fillI9Section2(data, { base, today, now: deps.now() })
+  return fillI9Section2(data, { base, today: todayIso(deps.now()), now: deps.now() })
 }
 
-/** The unsigned, filled Section 2 and where to sign it, for the review step of the form. */
+/** The unsigned Section 2, filled from the employee's entries, and where to sign it. */
 export async function prepareSection2(
   deps: CaseServiceDeps,
   user: StaffViewer,
-  input: { taskId: string; data: I9Section2Data },
+  input: { taskId: string },
 ): Promise<PreparedSection2> {
   const owned = requireReadyTask(deps, user, input.taskId)
-  const generated = await generateSection2(deps, owned, input.data)
+  const generated = await generateSection2(deps, owned, section2DataFor(deps, owned, user.displayName))
   return {
     pdf: generated.pdf,
     fields: generated.fields,
@@ -329,8 +344,8 @@ function parseConsent(raw: unknown, now: Date): Date {
 
 const clip = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`)
 
-/** The engine payload for the handler (`verify_i9_section2`), from the documents the specialist recorded. */
-export function handlerPayload(data: I9Section2Data): {
+/** The engine payload for the handler (`verify_i9_section2`), from the documents on Section 2. */
+export function handlerPayload(data: Pick<I9Section2Data, "listA" | "listB" | "listC">): {
   documentTitle: string
   issuingAuthority: string
   documentNumber: string
@@ -350,17 +365,19 @@ export type AcceptedSection2 = { documentId: string; sha256: string; signedAt: s
 
 /**
  * Signs Section 2 as the employer representative and completes the task in one transaction. The
- * signature rectangle comes from the generator (never the caller); the document number reaches the
- * database only through the engine's `store_form` effect, encrypted.
+ * documents come from the employee's stored entries (never the caller), as does the signature
+ * rectangle from the generator; the document number reaches the form record only through the
+ * engine's `store_form` effect, encrypted.
  */
 export async function acceptSection2(
   deps: CaseServiceDeps,
   user: StaffViewer,
-  input: { taskId: string; data: I9Section2Data; signature: SignatureInput; fieldValues: FieldValuesInput },
+  input: { taskId: string; signature: SignatureInput; fieldValues: FieldValuesInput },
 ): Promise<AcceptedSection2> {
   const owned = requireReadyTask(deps, user, input.taskId)
   const { basics, task } = owned
-  const generated = await generateSection2(deps, owned, input.data)
+  const data = section2DataFor(deps, owned, user.displayName)
+  const generated = await generateSection2(deps, owned, data)
 
   const signedAt = deps.now()
   const consentedAt = parseConsent(input.signature?.consentedAt, signedAt)
@@ -393,7 +410,7 @@ export async function acceptSection2(
       completeTaskInTx(tx, deps, {
         taskId: task.id,
         actor: actorOf(user as SessionUser),
-        payload: handlerPayload(input.data),
+        payload: handlerPayload(data),
       })
       tx.insert(generatedDocuments)
         .values({

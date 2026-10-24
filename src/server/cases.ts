@@ -18,6 +18,7 @@ import {
   users,
 } from "@/db/schema"
 import * as domain from "@/domain"
+import type { IdentityDocumentDetails } from "@/domain/forms"
 import {
   buildOrderFacts,
   cancelOpenTasks,
@@ -44,6 +45,7 @@ import {
 import { createDepositInvoice, owedDepositOnRestart, reissueForTermination, voidUnpaidDeposit } from "./billing-core"
 import { idFor, NotFoundError, type CaseServiceDeps, type Tx } from "./deps"
 import { MASTER_AGREEMENT_KIND } from "./documents/master-agreement"
+import { identityDetailColumns } from "./identity-documents"
 
 export { NotFoundError }
 export type { CaseServiceDeps }
@@ -247,11 +249,20 @@ export function createOrder(
 /**
  * The case's worker uploads an identity document (metadata and a path; file bytes are stored by
  * the caller). A newer document of the same kind supersedes the older one for the task that
- * reads "the active document per kind". Does not complete a task by itself.
+ * reads "the active document per kind". Does not complete a task by itself. `details` is what the
+ * worker entered about the document (null when nothing was entered); the number is stored
+ * encrypted and stays out of the `document_uploaded` event.
  */
 export function uploadCaseDocument(
   deps: CaseServiceDeps,
-  input: { actor: SessionUser; caseId: string; kind: DocumentKind; fileName: string; storagePath: string }
+  input: {
+    actor: SessionUser
+    caseId: string
+    kind: DocumentKind
+    fileName: string
+    storagePath: string
+    details: IdentityDocumentDetails | null
+  }
 ): { documentId: string } {
   return deps.db.transaction((tx) => {
     const record = loadCase(tx, input.caseId)
@@ -277,6 +288,7 @@ export function uploadCaseDocument(
         fileName: input.fileName,
         uploadedBy: input.actor.id,
         createdAt,
+        ...identityDetailColumns(documentId, input.details),
       })
       .run()
     const after = new Set(

@@ -114,12 +114,15 @@ export function openTaskCount(db: AppDatabase, user: Viewer, now: Date = new Dat
   return countInbox(db, user, now)
 }
 
-/** The client's "Needs your attention": their most urgent tasks and how many there are in all. */
+/**
+ * The client Home's "To do": the tasks assigned to this person, most urgent first, and how many
+ * there are in all. `limit` caps the rows; omitted, every open task is returned.
+ */
 export function attentionFor(
   db: AppDatabase,
   user: Viewer,
   now: Date = new Date(),
-  limit = 3,
+  limit?: number,
 ): { rows: TaskInboxRow[]; total: number } {
   const { items, total } = inboxPage(db, user, now, { limit })
   return { rows: rowsForItems(db, user, portalForRole(user.role), items, now), total }
@@ -180,6 +183,66 @@ export function staffInbox(
   query: TaskInboxQuery,
   now: Date = new Date(),
 ): TaskInboxPage {
+  const { visible, matching } = staffMatches(db, user, query, now)
+  const totalPages = Math.max(1, Math.ceil(matching.length / query.size))
+  const page = Math.min(query.page, totalPages)
+  const items = matching.slice((page - 1) * query.size, page * query.size)
+  return {
+    rows: rowsForItems(db, user, portalForRole(user.role), items, now),
+    total: matching.length,
+    page,
+    pageSize: query.size,
+    totalPages,
+    options: filterOptions(visible),
+    empty: visible.length === 0,
+  }
+}
+
+/** A staff home row plus the person's start date: the one fact the grouped home shows that the table never did. */
+export type StaffHomeRow = TaskInboxRow & { startDate: string | null }
+
+export type StaffHomePage = {
+  rows: StaffHomeRow[]
+  options: TaskInboxPage["options"]
+  empty: boolean
+}
+
+/**
+ * The grouped staff home: the same visible set, search and filters as `staffInbox`, unpaged (the
+ * home groups by urgency or task, which a page boundary would cut through; a role queue is
+ * team-sized), most urgent first, each row with its person's start date. `query.page` and
+ * `query.size` are ignored.
+ */
+export function staffHome(db: AppDatabase, user: Viewer, query: TaskInboxQuery, now: Date = new Date()): StaffHomePage {
+  const { visible, matching } = staffMatches(db, user, query, now)
+  const rows = rowsForItems(db, user, portalForRole(user.role), matching, now)
+  const caseIds = [...new Set(rows.map((row) => row.caseId))]
+  const starts = new Map(
+    caseIds.length === 0
+      ? []
+      : db
+          .select({ caseId: onboardingCases.id, startDate: hireRequests.startDate })
+          .from(onboardingCases)
+          .innerJoin(hireRequests, eq(hireRequests.id, onboardingCases.hireRequestId))
+          .where(inArray(onboardingCases.id, caseIds))
+          .all()
+          .map((row) => [row.caseId, row.startDate] as const),
+  )
+  return {
+    rows: rows.map((row) => ({ ...row, startDate: starts.get(row.caseId) ?? null })),
+    options: filterOptions(visible),
+    empty: visible.length === 0,
+  }
+}
+
+function filterOptions(visible: readonly QueueItem[]): TaskInboxPage["options"] {
+  return {
+    clients: distinctOptions(visible.map((item): [string, string] => [item.clientId, item.clientName])),
+    tasks: distinctOptions(visible.map((item): [string, string] => [item.key, item.title])),
+  }
+}
+
+function staffMatches(db: AppDatabase, user: Viewer, query: TaskInboxQuery, now: Date) {
   const visible = inboxPage(db, user, now).items
   const searched = query.q ? inboxPage(db, user, now, { search: query.q }).items : visible
   const atRisk = query.status === "at_risk" ? atRiskCases(db, searched.map((item) => item.caseId), now) : null
@@ -194,21 +257,7 @@ export function staffInbox(
           now,
         )),
   )
-  const totalPages = Math.max(1, Math.ceil(matching.length / query.size))
-  const page = Math.min(query.page, totalPages)
-  const items = matching.slice((page - 1) * query.size, page * query.size)
-  return {
-    rows: rowsForItems(db, user, portalForRole(user.role), items, now),
-    total: matching.length,
-    page,
-    pageSize: query.size,
-    totalPages,
-    options: {
-      clients: distinctOptions(visible.map((item): [string, string] => [item.clientId, item.clientName])),
-      tasks: distinctOptions(visible.map((item): [string, string] => [item.key, item.title])),
-    },
-    empty: visible.length === 0,
-  }
+  return { visible, matching }
 }
 
 /**

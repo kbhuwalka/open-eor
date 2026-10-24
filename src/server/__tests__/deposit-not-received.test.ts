@@ -8,7 +8,6 @@ import { depositState, loadPaymentsForInvoices } from "../billing-core"
 import { listClientInvoices } from "../billing-queries"
 import { cancelOrder } from "../cases"
 import { createFinanceQueries, type FinanceActor } from "../finance-queries"
-import { listPendingDeposits } from "../finance-portal-queries"
 import { tasksForCase } from "../tasks"
 
 import { alex, sessionUser, setup, tempDbFactory } from "./helpers"
@@ -27,6 +26,17 @@ const paymentsOf = (db: AppDatabase, hireId: string) =>
   loadPaymentsForInvoices(db, [`deposit:${hireId}`])
     .sort((x, y) => x.initiatedAt.localeCompare(y.initiatedAt) || x.id.localeCompare(y.id))
     .map((payment) => ({ id: payment.id, status: payment.status, failureReason: payment.failureReason }))
+/** The deposit's state, its in-flight payment and how many invoices that payment covers, and the ready deposit step. */
+const depositSnapshot = (db: AppDatabase, caseId: string, hireId: string) => {
+  const inFlightPayment = loadPaymentsForInvoices(db, [`deposit:${hireId}`]).find((payment) => payment.status === "initiated")
+  const ready = tasksForCase(db, caseId).filter((task) => task.status === "ready" && ["confirm_deposit", "pay_deposit"].includes(task.key))
+  return {
+    state: depositState(db, hireId).state,
+    paymentId: inFlightPayment?.id ?? null,
+    paymentInvoiceCount: inFlightPayment?.allocations.length ?? 0,
+    taskKey: (ready.find((task) => task.key === "confirm_deposit") ?? ready[0])?.key ?? null,
+  }
+}
 const eventsOf = (db: AppDatabase, caseId: string, type: string) =>
   db.select().from(caseEvents).where(and(eq(caseEvents.caseId, caseId), eq(caseEvents.type, type))).all()
 
@@ -62,13 +72,13 @@ describe("Finance: deposit not received", () => {
 
   it("moves the order from the 'processing' list entry to 'awaiting payment', with only Confirm received possible", () => {
     const { db, ctx, actor } = inFlight()
-    const before = listPendingDeposits(db, actor, ctx.clock.now).find((row) => row.caseId === ctx.caseId)
+    const before = depositSnapshot(db, ctx.caseId, ctx.hireId)
     expect(before).toMatchObject({ state: "processing", taskKey: "confirm_deposit", paymentInvoiceCount: 1 })
     expect(before?.paymentId).toBeTruthy()
 
     markDepositNotReceived(ctx.deps, { actor, caseId: ctx.caseId })
 
-    const after = listPendingDeposits(db, actor, ctx.clock.now).find((row) => row.caseId === ctx.caseId)
+    const after = depositSnapshot(db, ctx.caseId, ctx.hireId)
     expect(after).toMatchObject({ state: "open", taskKey: "pay_deposit", paymentId: null, paymentInvoiceCount: 0 })
     expect(() => markDepositNotReceived(ctx.deps, { actor, caseId: ctx.caseId })).toThrowError(codeOf("ILLEGAL_TRANSITION"))
   })
@@ -77,6 +87,21 @@ describe("Finance: deposit not received", () => {
     const { db, ctx, actor } = inFlight()
     markDepositNotReceived(ctx.deps, { actor, caseId: ctx.caseId, reason: "  ACH debit returned  " })
     expect(paymentsOf(db, ctx.hireId)[0].failureReason).toBe("Deposit not received: ACH debit returned")
+  })
+
+  it("pinned to a payment, fails only that one: a stale screen cannot fail the client's newer payment", async () => {
+    const { db, ctx, actor } = inFlight()
+    const [first] = paymentsOf(db, ctx.hireId)
+    markDepositNotReceived(ctx.deps, { actor, caseId: ctx.caseId, paymentId: first.id })
+    const queries = createFinanceQueries({ getDb: () => db, now: () => ctx.clock.now })
+    const again = await queries.payInvoices(SEED_IDS.client, [`deposit:${ctx.hireId}`], ACME_ACTOR)
+    if (!again.ok) throw new Error(`payment rejected: ${again.error}`)
+
+    expect(() => markDepositNotReceived(ctx.deps, { actor, caseId: ctx.caseId, paymentId: first.id })).toThrowError(
+      expect.objectContaining({ code: "ILLEGAL_TRANSITION", details: expect.objectContaining({ entity: "payment" }) }),
+    )
+    expect(paymentsOf(db, ctx.hireId).map((payment) => payment.status).sort()).toEqual(["failed", "initiated"])
+    expect(markDepositNotReceived(ctx.deps, { actor, caseId: ctx.caseId, paymentId: again.paymentId }).paymentId).toBe(again.paymentId)
   })
 
   it("is refused when the client has not paid: there is nothing to fail", () => {
@@ -158,7 +183,7 @@ describe("a failed deposit payment reopens the payment step, however it fails", 
     const paid = await queries.payInvoices(SEED_IDS.client, [`deposit:${a.hireId}`, `deposit:${b.hireId}`], ACME_ACTOR)
     if (!paid.ok) throw new Error(`payment rejected: ${paid.error}`)
     const actor = finance(db)
-    const row = listPendingDeposits(db, actor, a.clock.now).find((deposit) => deposit.caseId === a.caseId)
+    const row = depositSnapshot(db, a.caseId, a.hireId)
     expect(row).toMatchObject({ state: "processing", paymentId: paid.paymentId, paymentInvoiceCount: 2 })
 
     markDepositNotReceived(a.deps, { actor, caseId: a.caseId })

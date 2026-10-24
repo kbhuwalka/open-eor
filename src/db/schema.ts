@@ -224,6 +224,13 @@ export const caseDocuments = sqliteTable(
       .notNull()
       .references(() => users.id),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    /** I-9 identity uploads: what the employee entered. All four are null on uploads made before details were asked for. */
+    documentTitle: text("document_title"),
+    issuingAuthority: text("issuing_authority"),
+    /** AES-GCM token (`encryptSecret`, AAD `case_documents:<id>`). Never log, never put in a payload. */
+    documentNumberEncrypted: text("document_number_encrypted"),
+    /** `YYYY-MM-DD`; null when the document has no expiration date. */
+    expiresOn: text("expires_on"),
   },
   (table) => [
     index("case_documents_case_kind_created_idx").on(

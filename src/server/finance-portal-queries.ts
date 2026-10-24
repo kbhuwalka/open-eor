@@ -1,30 +1,21 @@
 /**
- * Read models of the Finance role's portal (docs/finance-portal.md): the deposits awaiting Finance,
- * the home tiles, the company filter and the PDF input of any invoice. Invoices, payments and
+ * Read models of the Finance role's portal (docs/finance-portal.md): the Home's three tiles, the
+ * company filter, the payment counts and the PDF input of any invoice. Invoices, payments and
  * receivables themselves come from `billing-queries.ts`. Every function takes the session user and
  * refuses anyone but Finance; nothing here writes.
  */
-import { and, asc, eq, inArray, sql } from "drizzle-orm"
+import { asc, eq, sql } from "drizzle-orm"
 
 import type { SessionUser } from "@/auth"
 import type { AppDatabase } from "@/db/client"
-import {
-  clientCompanies,
-  hireRequests,
-  invoices,
-  onboardingCases,
-  payments,
-  roles,
-  tasks as tasksTable,
-  users,
-} from "@/db/schema"
+import { clientCompanies, hireRequests, onboardingCases, payments, roles, users } from "@/db/schema"
 import { businessDayOf } from "@/domain/business-time"
 import { DomainError } from "@/domain/types"
 
-import { loadInvoice, loadPaymentsForInvoices, depositState } from "./billing-core"
-import { AGEING_BUCKETS, receivables } from "./billing-queries"
-import { previewBillingRun } from "./billing-preview"
+import { loadInvoice, loadPaymentsForInvoices } from "./billing-core"
+import { previewBillingRun, type BillingPreview } from "./billing-preview"
 import type { InvoicePdfInput } from "./documents/invoice-pdf"
+import { clientAgeing, type AgeingTotals } from "./finance-insights"
 
 type Reader = Pick<AppDatabase, "select" | "selectDistinct">
 
@@ -32,147 +23,69 @@ function assertFinance(actor: Pick<SessionUser, "role">): void {
   if (actor.role !== "finance") throw new DomainError("FORBIDDEN_ROLE", { actorRole: actor.role })
 }
 
-// ── Deposits ────────────────────────────────────────────────────────
-
-export type PendingDepositState = "open" | "processing"
-
-export type PendingDeposit = {
-  caseId: string
-  hireId: string
-  personName: string
-  companyId: string
-  companyName: string
-  startDate: string | null
-  invoiceId: string
-  invoiceNumber: string
-  amountCents: number
-  /** `open`: the client has not paid. `processing`: the client's payment awaits settlement. */
-  state: PendingDepositState
-  issueDate: string
-  dueDate: string
-  /** Open and past its due date. */
-  overdue: boolean
-  /** The client's initiated payment while `processing`: the one "Not received" fails. */
-  paymentId: string | null
-  /** How many invoices that payment covers (more than one means it also covers other invoices), 0 without one. */
-  paymentInvoiceCount: number
-  /** The ready deposit task Finance's action completes; `null` when none is ready (nothing to resolve here). */
-  taskId: string | null
-  taskKey: "confirm_deposit" | "pay_deposit" | null
-}
-
-const DEPOSIT_TASK_KEYS = ["confirm_deposit", "pay_deposit"] as const
-
-/**
- * Orders (open cases) whose deposit invoice is open or processing: the deposits Finance can confirm
- * (received) and, when the client's payment is in flight, mark not received. Waiting-on-Finance (`processing`) first, then by due date.
- */
-export function listPendingDeposits(db: Reader, actor: Pick<SessionUser, "role">, now: Date = new Date()): PendingDeposit[] {
-  assertFinance(actor)
-  const today = businessDayOf(now)
-  const rows = db
-    .select({
-      caseId: onboardingCases.id,
-      hireId: hireRequests.id,
-      personName: users.displayName,
-      companyId: clientCompanies.id,
-      companyName: clientCompanies.name,
-      startDate: hireRequests.startDate,
-      invoiceId: invoices.id,
-    })
-    .from(invoices)
-    .innerJoin(hireRequests, eq(hireRequests.id, invoices.hireId))
-    .innerJoin(onboardingCases, eq(onboardingCases.hireRequestId, hireRequests.id))
-    .innerJoin(users, eq(users.id, onboardingCases.workerUserId))
-    .innerJoin(clientCompanies, eq(clientCompanies.id, invoices.companyId))
-    .where(and(eq(invoices.kind, "deposit"), eq(onboardingCases.lifecycle, "open")))
-    .all()
-
-  const readyTasks = rows.length
-    ? db
-        .select({ id: tasksTable.id, caseId: tasksTable.caseId, key: tasksTable.key })
-        .from(tasksTable)
-        .where(and(inArray(tasksTable.caseId, rows.map((row) => row.caseId)), inArray(tasksTable.key, [...DEPOSIT_TASK_KEYS]), eq(tasksTable.status, "ready")))
-        .all()
-    : []
-
-  const result: PendingDeposit[] = []
-  for (const row of rows) {
-    const { state, invoice } = depositState(db, row.hireId)
-    if (!invoice || (state !== "open" && state !== "processing")) continue
-    const tasks = readyTasks.filter((task) => task.caseId === row.caseId)
-    const task = tasks.find((t) => t.key === "confirm_deposit") ?? tasks[0] ?? null
-    const payment = state === "processing" ? loadPaymentsForInvoices(db, [invoice.id]).find((p) => p.status === "initiated") : undefined
-    result.push({
-      caseId: row.caseId,
-      hireId: row.hireId,
-      personName: row.personName,
-      companyId: row.companyId,
-      companyName: row.companyName,
-      startDate: row.startDate,
-      invoiceId: invoice.id,
-      invoiceNumber: invoice.number,
-      amountCents: invoice.totalCents,
-      state,
-      issueDate: invoice.issueDate,
-      dueDate: invoice.dueDate,
-      overdue: state === "open" && invoice.dueDate < today,
-      paymentId: payment?.id ?? null,
-      paymentInvoiceCount: payment?.allocations.length ?? 0,
-      taskId: task?.id ?? null,
-      taskKey: task ? (task.key as PendingDeposit["taskKey"]) : null,
-    })
-  }
-  return result.sort(
-    (a, b) =>
-      Number(b.state === "processing") - Number(a.state === "processing") ||
-      a.dueDate.localeCompare(b.dueDate) ||
-      a.personName.localeCompare(b.personName),
-  )
-}
-
-// ── Overview tiles ──────────────────────────────────────────────────
+// ── Home tiles ──────────────────────────────────────────────────────
 
 export type FinanceOverview = {
+  /** The business day (America/New_York) the figures are for. */
   today: string
-  paymentsToReconcile: { count: number; cents: number }
-  depositsAwaiting: { count: number; cents: number }
-  /** Past-due receivables across every client (ageing buckets after `current`). */
-  overdueReceivables: { count: number; cents: number }
-  billing: {
-    /** Invoices the run would issue today. */
-    toIssueCount: number
-    toIssueCents: number
-    /** Issue date of the next scheduled pay period. */
-    nextIssueDate: string | null
+  /** Every initiated payment: the To settle tab and the nav's Payments count. */
+  toSettle: { count: number; cents: number; oldestInitiatedAt: string | null }
+  /** Payable invoices past their due date (the ageing buckets after `current`). */
+  overdue: { count: number; cents: number; oldestDays: number | null }
+  /** What Run billing would issue now, and the issue date of the next scheduled pay period. */
+  readyToBill: { count: number; cents: number; nextIssueDate: string | null }
+}
+
+export type OverviewInput = {
+  today: string
+  initiated: { count: number; cents: number; oldestInitiatedAt: string | null }
+  book: Pick<AgeingTotals, "overdueCents" | "overdueCount" | "oldestOverdueDays">
+  preview: Pick<BillingPreview, "wouldIssue" | "upcoming">
+}
+
+/** The Home tiles from what the pages behind them read: To settle, the book's ageing and the billing preview. */
+export function overviewFrom({ today, initiated, book, preview }: OverviewInput): FinanceOverview {
+  return {
+    today,
+    toSettle: { ...initiated },
+    overdue: { count: book.overdueCount, cents: book.overdueCents, oldestDays: book.oldestOverdueDays },
+    readyToBill: {
+      count: preview.wouldIssue.count,
+      cents: preview.wouldIssue.totalCents,
+      nextIssueDate: preview.upcoming[0]?.issueDate ?? null,
+    },
   }
 }
 
-export function financeOverview(db: Reader, actor: SessionUser, now: Date = new Date()): FinanceOverview {
+/**
+ * Finance: the three Home tiles. A page that already holds the book's ageing or the billing preview
+ * passes them, so neither the receivables nor the billing run is planned twice in one request.
+ */
+export function financeOverview(
+  db: Reader,
+  actor: SessionUser,
+  now: Date = new Date(),
+  given: { book?: AgeingTotals; preview?: BillingPreview } = {},
+): FinanceOverview {
   assertFinance(actor)
-  const reconcile = db
+  const totals = db
     .select({ count: sql<number>`count(*)`, cents: sql<number>`coalesce(sum(${payments.totalCents}), 0)` })
     .from(payments)
     .where(eq(payments.status, "initiated"))
     .get()
-  const deposits = listPendingDeposits(db, actor, now)
-  const owed = receivables(db, actor, now)
-  const late = AGEING_BUCKETS.filter((bucket) => bucket !== "current")
-  const preview = previewBillingRun(db, actor, now)
-  return {
-    today: owed.asOf,
-    paymentsToReconcile: { count: reconcile?.count ?? 0, cents: reconcile?.cents ?? 0 },
-    depositsAwaiting: { count: deposits.length, cents: deposits.reduce((total, d) => total + d.amountCents, 0) },
-    overdueReceivables: {
-      count: late.reduce((total, bucket) => total + owed.buckets[bucket].count, 0),
-      cents: late.reduce((total, bucket) => total + owed.buckets[bucket].cents, 0),
-    },
-    billing: {
-      toIssueCount: preview.wouldIssue.count,
-      toIssueCents: preview.wouldIssue.totalCents,
-      nextIssueDate: preview.upcoming[0]?.issueDate ?? null,
-    },
-  }
+  const oldest = db
+    .select({ initiatedAt: payments.initiatedAt })
+    .from(payments)
+    .where(eq(payments.status, "initiated"))
+    .orderBy(asc(payments.initiatedAt), asc(payments.id))
+    .limit(1)
+    .get()
+  return overviewFrom({
+    today: businessDayOf(now),
+    initiated: { count: totals?.count ?? 0, cents: totals?.cents ?? 0, oldestInitiatedAt: oldest ? oldest.initiatedAt.toISOString() : null },
+    book: given.book ?? clientAgeing(db, actor, now).bookAgeing,
+    preview: given.preview ?? previewBillingRun(db, actor, now),
+  })
 }
 
 // ── Filters and the PDF ─────────────────────────────────────────────

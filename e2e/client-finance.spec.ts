@@ -108,6 +108,12 @@ test("clicking a row opens the drawer with itemised lines, totals, history and t
   await expect(drawer).not.toContainText("Terms")
   await expect(drawer).not.toContainText("start date")
   await expect(page.getByTestId("drawer-pdf")).toHaveAttribute("href", /\/client\/finance\/invoices\/.+\/pdf$/)
+  await expect(page.getByTestId("drawer-actions").locator("> *").first()).toHaveText(/^Pay \$/)
+  await expect(page.getByTestId("drawer-position")).toHaveText(/^1 of \d+$/)
+  await expect(drawer).not.toContainText(/view full invoice/i)
+
+  await page.getByRole("button", { name: "Next invoice" }).click()
+  await expect(page.getByTestId("drawer-number")).toHaveText((await payableRows(section).nth(1).getByTestId("invoice-open").textContent())!.trim())
 
   await page.keyboard.press("Escape")
   await expect(drawer).toBeHidden()

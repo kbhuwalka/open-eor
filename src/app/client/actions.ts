@@ -187,6 +187,7 @@ export async function createPerson(
     return result
   }
   revalidatePath("/client")
+  revalidatePath("/client/people")
   redirect(`/client/people/${caseId}`)
 }
 
@@ -198,6 +199,7 @@ export async function cancelPersonRequest(
     const actor = await requireRole("client_hr")
     const result = cancelOrder(deps(), { actor, caseId, note })
     revalidatePath("/client")
+    revalidatePath("/client/people")
     revalidatePath(`/client/people/${caseId}`)
     return { ok: true, data: result }
   } catch (error) {
@@ -216,6 +218,7 @@ export async function terminateActivePerson(
     }
     const result = terminatePerson(deps(), { actor, caseId, ...input })
     revalidatePath("/client")
+    revalidatePath("/client/people")
     revalidatePath(`/client/people/${caseId}`)
     return { ok: true, data: result }
   } catch (error) {
@@ -240,6 +243,7 @@ export async function reactivatePerson(
     }
     const result = reactivatePersonRecord(deps(), { actor, caseId, newEndDate })
     revalidatePath("/client")
+    revalidatePath("/client/people")
     revalidatePath(`/client/people/${caseId}`)
     return { ok: true, data: result }
   } catch (error) {
@@ -257,6 +261,7 @@ async function completeClientTask(
     const actor = await requireRole("client_hr")
     const result = completeTaskAsActor(deps(), { actor, taskId, payload })
     revalidatePath("/client")
+    revalidatePath("/client/people")
     revalidatePath(`/client/people/${caseId}`)
     return { ok: true, data: { key: result.key } }
   } catch (error) {
@@ -327,6 +332,7 @@ export async function signMasterAgreementAction(
     if (!parsed) return fail("validation", "Sign the agreement where it is marked before finishing.")
     const data = await signMasterAgreementDocument(deps(), { actor, ...parsed })
     revalidatePath("/client")
+    revalidatePath("/client/people")
     revalidatePath("/client/people/new")
     return { ok: true, data }
   } catch (error) {
@@ -348,6 +354,7 @@ export async function signAgreementTaskAction(
     }
     const data = await signMasterAgreementDocument(deps(), { actor, ...parsed, task: { caseId, taskId } })
     revalidatePath("/client")
+    revalidatePath("/client/people")
     revalidatePath(`/client/people/${caseId}`)
     return { ok: true, data }
   } catch (error) {

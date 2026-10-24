@@ -8,6 +8,8 @@ test("an onboarding person's tab shows a headline and stages without task jargon
   await page.goto("/pick")
   await page.getByRole("button", { name: /Alex Harper/ }).click()
   await page.waitForURL(/\/client/)
+  await page.getByRole("navigation").getByRole("link", { name: /^People/ }).click()
+  await page.waitForURL(/\/client\/people$/)
 
   const row = page.getByTestId("person-row").filter({ has: page.locator('[data-status="onboarding"]') }).first()
   await expect(row).toBeVisible()

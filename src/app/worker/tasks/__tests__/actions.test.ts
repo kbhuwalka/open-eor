@@ -220,13 +220,20 @@ describe("completing tasks through the engine", () => {
     })
 
     const taskId = ctx.taskId("upload_documents")
-    const form = (kind: string, file: File) => {
+    const passport = { title: "U.S. Passport", issuingAuthority: "", number: "583920174", expiresOn: "2034-05-15" }
+    const form = (kind: string, file: File, details: Record<string, string> = passport) => {
       const data = new FormData()
       data.set("kind", kind)
       data.set("file", file)
+      for (const [key, value] of Object.entries(details)) data.set(key, value)
       return data
     }
     expect(await uploadDocumentAction(taskId, new FormData())).toMatchObject({ ok: false, code: "validation" })
+    expect(await uploadDocumentAction(taskId, form("list_a", new File([PNG], "passport.png", { type: "image/png" }), {}))).toMatchObject({
+      ok: false,
+      code: "validation",
+      details: { errors: { title: "Choose the document.", number: "Enter the document number." } },
+    })
     expect(await uploadDocumentAction(taskId, form("list_a", new File(["not an image"], "id.png", { type: "image/png" })))).toMatchObject({ ok: false, code: "validation", details: { upload: "content" } })
     expect(await uploadDocumentAction(taskId, form("list_a", new File([PNG], "id.exe", { type: "application/x-msdownload" })))).toMatchObject({ ok: false, details: { upload: "type" } })
     expect(await submitDocumentsAction(taskId, "list_a")).toMatchObject({ ok: false, code: "validation" })

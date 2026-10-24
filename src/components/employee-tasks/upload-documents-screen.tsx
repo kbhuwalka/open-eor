@@ -7,14 +7,25 @@ import { cn } from "cn"
 
 import { RadioOption } from "@/components/tax-forms/fields"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { I9_DOCUMENT_TITLES } from "@/domain/forms"
-import type { EmployeeScreenData, EmployeeUploadView } from "@/lib/employee-screen-data"
+import {
+  I9_DOCUMENT_TITLES,
+  parseIdentityDocumentDetails,
+  type FieldErrors,
+  type IdentityDocumentDetails,
+} from "@/domain/forms"
+import type { EmployeeScreenData, EmployeeUploadView, UploadDetailsView } from "@/lib/employee-screen-data"
 import { formatDay } from "@/lib/format"
 import { rejectReasonText } from "@/lib/task-view"
 import { submitDocumentsAction, uploadDocumentAction } from "@/app/worker/tasks/actions"
 
 import { CompletedPanel } from "./completed-panel"
 import { FormError } from "./form-error"
+import {
+  IdentityDocumentFields,
+  identityDocumentDraft,
+  identityDocumentForm,
+  type IdentityDocumentForm,
+} from "./identity-document-fields"
 import { EmployeeTaskFrame } from "./task-frame"
 import { useTaskFlow } from "./use-task-flow"
 
@@ -84,33 +95,65 @@ function checkFile(file: File): string | null {
   return null
 }
 
+function detailsLine(details: UploadDetailsView, now: Date): string {
+  const expiry = details.expiresOn ? `expires ${formatDay(new Date(`${details.expiresOn}T00:00:00`), now)}` : "no expiration date"
+  return `${details.title} · ${details.maskedNumber} · ${expiry}`
+}
+
 function Slot({
   kind,
   upload,
   reason,
   now,
+  today,
   disabled,
-  onChoose,
+  onUpload,
   busy,
   error,
+  serverErrors,
 }: {
   kind: Kind
   upload: EmployeeUploadView | undefined
   reason: string | null
   now: Date
+  today: string
   disabled: boolean
-  onChoose: (file: File) => void
+  onUpload: (file: File, details: IdentityDocumentDetails) => Promise<boolean>
   busy: boolean
   error: string | null
+  serverErrors: FieldErrors
 }) {
   const input = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
+  const [replacing, setReplacing] = useState(false)
+  const [form, setForm] = useState<IdentityDocumentForm>(() => identityDocumentForm(upload?.details ?? null))
+  const [pending, setPending] = useState<File | null>(null)
+  const [checked, setChecked] = useState(false)
   const info = SLOT[kind]
   const inputId = `file-${kind}`
   const sentBack = upload?.status === "rejected"
+  const editing = !disabled && (!upload || upload.details === null || replacing)
+  const parsed = parseIdentityDocumentDetails(kind, identityDocumentDraft(form), { today })
+  const fieldErrors = checked && !parsed.ok ? parsed.errors : serverErrors
+
+  async function send(file: File) {
+    setChecked(true)
+    if (!parsed.ok) {
+      setPending(file)
+      return
+    }
+    if (await onUpload(file, parsed.details)) {
+      setPending(null)
+      setChecked(false)
+      setReplacing(false)
+      setForm((prev) => ({ ...prev, number: "" }))
+    } else {
+      setPending(file)
+    }
+  }
 
   function pick(file: File | undefined) {
-    if (file) onChoose(file)
+    if (file) void send(file)
     if (input.current) input.current.value = ""
   }
 
@@ -123,7 +166,7 @@ function Slot({
       )}
       data-testid={`slot-${kind}`}
       onDragOver={(event) => {
-        if (disabled) return
+        if (!editing) return
         event.preventDefault()
         setDragging(true)
       }}
@@ -131,7 +174,7 @@ function Slot({
       onDrop={(event) => {
         event.preventDefault()
         setDragging(false)
-        if (!disabled) pick(event.dataTransfer.files[0])
+        if (editing && !busy) pick(event.dataTransfer.files[0])
       }}
     >
       <div className="flex items-start justify-between gap-3">
@@ -151,46 +194,98 @@ function Slot({
             <span className="truncate text-sm font-medium" data-testid="upload-name">
               {upload.fileName}
             </span>
-            <span className="text-xs tabular-nums text-muted-foreground">
-              Uploaded {formatDay(new Date(upload.uploadedAt), now)}
+            <span className="text-xs tabular-nums text-muted-foreground" data-testid="upload-details">
+              {upload.details ? detailsLine(upload.details, now) : `Uploaded ${formatDay(new Date(upload.uploadedAt), now)}`}
             </span>
           </div>
         </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          For example: {info.examples.join(", ")}. PNG, JPEG or PDF, up to 10 MB.
-        </p>
-      )}
+      ) : null}
 
       {sentBack && reason ? (
         <p className="text-sm text-status-danger-foreground" data-testid="upload-reason">
           {reason}
         </p>
       ) : null}
+      {upload && upload.details === null && !disabled ? (
+        <p className="text-sm text-muted-foreground" data-testid="upload-needs-details">
+          Add this document&apos;s details and upload it again.
+        </p>
+      ) : null}
+
+      {editing ? (
+        <>
+          <IdentityDocumentFields kind={kind} form={form} errors={fieldErrors} onChange={setForm} />
+          {!upload ? (
+            <p className="text-xs text-muted-foreground">
+              For example: {info.examples.join(", ")}. PNG, JPEG or PDF, up to 10 MB.
+            </p>
+          ) : null}
+        </>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        <input
-          ref={input}
-          id={inputId}
-          type="file"
-          accept={ACCEPT}
-          className="sr-only"
-          disabled={disabled || busy}
-          onChange={(event) => pick(event.target.files?.[0])}
-          data-testid={`file-${kind}`}
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={disabled || busy}
-          onClick={() => input.current?.click()}
-          data-testid={`choose-${kind}`}
-        >
-          {upload ? <RefreshCw data-icon="inline-start" /> : <ImageUp data-icon="inline-start" />}
-          {busy ? "Uploading…" : upload ? "Replace" : "Choose file"}
-        </Button>
-        {!upload && !busy ? <span className="text-xs text-muted-foreground">or drop a file here</span> : null}
+        {editing ? (
+          <>
+            <input
+              ref={input}
+              id={inputId}
+              type="file"
+              accept={ACCEPT}
+              className="sr-only"
+              disabled={busy}
+              onChange={(event) => pick(event.target.files?.[0])}
+              data-testid={`file-${kind}`}
+            />
+            {pending ? (
+              <>
+                <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void send(pending)} data-testid={`send-file-${kind}`}>
+                  <ImageUp data-icon="inline-start" />
+                  {busy ? "Uploading…" : `Upload ${pending.name}`}
+                </Button>
+                <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => input.current?.click()} data-testid={`choose-${kind}`}>
+                  Choose another file
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => input.current?.click()} data-testid={`choose-${kind}`}>
+                  <ImageUp data-icon="inline-start" />
+                  {busy ? "Uploading…" : "Choose file"}
+                </Button>
+                {!busy ? <span className="text-xs text-muted-foreground">or drop a file here</span> : null}
+              </>
+            )}
+            {replacing ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => {
+                  setReplacing(false)
+                  setPending(null)
+                  setChecked(false)
+                }}
+              >
+                Cancel
+              </Button>
+            ) : null}
+          </>
+        ) : upload && !disabled ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setForm(identityDocumentForm(upload.details))
+              setReplacing(true)
+            }}
+            data-testid={`replace-${kind}`}
+          >
+            <RefreshCw data-icon="inline-start" />
+            Replace
+          </Button>
+        ) : null}
       </div>
       {error ? (
         <p role="alert" className="text-xs text-destructive" data-testid={`upload-error-${kind}`}>
@@ -230,10 +325,12 @@ function Thumbnail({ upload }: { upload: EmployeeUploadView }) {
 }
 
 /**
- * List A, or List B and List C. Each file is checked in the browser (type, size) and again on the
- * server (its real content), stored as soon as it is chosen, and shown with what Northwind decided.
- * The same screen serves the rework task: it shows why the documents were sent back and takes the
- * replacements.
+ * List A, or List B and List C. For each document the employee says which one it is and enters its
+ * number and expiration date (Section 2 is filled from these; Northwind reviews them and cannot
+ * change them), then chooses the file. The file is checked in the browser (type, size) and again on
+ * the server (its real content), stored with the details once both are valid, and shown with what
+ * Northwind decided. The same screen serves the rework task: it shows why the documents were sent
+ * back and takes the replacements.
  */
 export function UploadDocumentsScreen({ data }: { data: Data }) {
   const flow = useTaskFlow()
@@ -245,34 +342,45 @@ export function UploadDocumentsScreen({ data }: { data: Data }) {
   })
   const [busy, setBusy] = useState<Kind | null>(null)
   const [errors, setErrors] = useState<Partial<Record<Kind, string>>>({})
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<Kind, FieldErrors>>>({})
   const reason = data.rework ? rejectReasonText(data.rework) : null
   const canEdit = data.canAct && !data.completed
+  const today = data.nowIso.slice(0, 10)
 
   const kinds = PATHS[path].kinds
   const chosen = kinds.map((kind) => uploads.find((doc) => doc.kind === kind))
-  const complete = chosen.every(Boolean)
+  const complete = chosen.every((doc) => doc?.details)
   const anySentBack = chosen.some((doc) => doc?.status === "rejected")
 
-  async function upload(kind: Kind, file: File) {
+  async function upload(kind: Kind, file: File, details: IdentityDocumentDetails): Promise<boolean> {
     const problem = checkFile(file)
     if (problem) {
       setErrors((prev) => ({ ...prev, [kind]: problem }))
-      return
+      return false
     }
     setErrors((prev) => ({ ...prev, [kind]: undefined }))
+    setFieldErrors((prev) => ({ ...prev, [kind]: undefined }))
     setBusy(kind)
     const form = new FormData()
     form.set("kind", kind)
     form.set("file", file)
+    form.set("title", details.title)
+    form.set("issuingAuthority", details.issuingAuthority)
+    form.set("number", details.number)
+    form.set("expiresOn", details.expiresOn ?? "")
     try {
       const result = await uploadDocumentAction(data.taskId, form)
       if (result.ok) {
         setUploads((prev) => [...prev.filter((doc) => doc.kind !== kind), result.data])
-      } else {
-        setErrors((prev) => ({ ...prev, [kind]: result.message }))
+        return true
       }
+      setErrors((prev) => ({ ...prev, [kind]: result.message }))
+      const fields = result.details?.errors
+      if (fields && typeof fields === "object") setFieldErrors((prev) => ({ ...prev, [kind]: fields as FieldErrors }))
+      return false
     } catch {
       setErrors((prev) => ({ ...prev, [kind]: "The upload did not go through. Check your connection and try again." }))
+      return false
     } finally {
       setBusy(null)
     }
@@ -310,10 +418,12 @@ export function UploadDocumentsScreen({ data }: { data: Data }) {
                 upload={chosen[index]}
                 reason={reason}
                 now={now}
+                today={today}
                 disabled={!canEdit}
-                onChoose={(file) => void upload(kind, file)}
+                onUpload={(file, details) => upload(kind, file, details)}
                 busy={busy === kind}
                 error={errors[kind] ?? null}
+                serverErrors={fieldErrors[kind] ?? {}}
               />
             ))}
           </ul>

@@ -302,7 +302,7 @@ export function NewPersonForm({
           <Button type="button" onClick={reviewQuote} data-testid="review-quote">
             Review quote
           </Button>
-          <Button variant="ghost" render={<Link href="/client" />} nativeButton={false}>
+          <Button variant="ghost" render={<Link href="/client/people" />} nativeButton={false}>
             Cancel
           </Button>
         </div>

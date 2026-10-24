@@ -8,7 +8,6 @@ import {
   ClipboardCheck,
   ClipboardList,
   FileText,
-  HandCoins,
   HeartPulse,
   House,
   Inbox,
@@ -31,7 +30,6 @@ const ICONS = {
   finance: Landmark,
   home: House,
   payments: Banknote,
-  deposits: HandCoins,
   invoices: FileText,
   documents: FileText,
   benefits: HeartPulse,
@@ -48,13 +46,14 @@ export type NavItem = {
   href: string
   /** Optional count badge (e.g. pending reviews). Hidden when 0. */
   count?: number
-  /** Match nested routes too (e.g. /onboarding/cases/[id] highlights Cases). */
+  /** Match nested routes too (e.g. /onboarding/people/[id] highlights People). */
   prefix?: boolean
-  /** Extra path prefixes this item owns (e.g. People owns /client/people). */
+  /** Extra path prefixes this item owns (e.g. the client Home owns /client/tasks). */
   also?: string[]
 }
 
-function isActive(item: NavItem, pathname: string): boolean {
+/** The item owns `pathname`: its own route, a nested one when `prefix` is set, or one of `also`. */
+export function isNavItemActive(item: NavItem, pathname: string): boolean {
   if (pathname === item.href) return true
   if (item.prefix && pathname.startsWith(`${item.href}/`)) return true
   return (item.also ?? []).some((p) => pathname === p || pathname.startsWith(`${p}/`))
@@ -68,7 +67,7 @@ export function SidebarNav({ items }: { items: NavItem[] }) {
     <nav className="flex-1 overflow-y-auto px-3 pt-6" aria-label="Portal">
       <ul className="flex flex-col gap-1">
         {items.map((item) => {
-          const active = isActive(item, pathname)
+          const active = isNavItemActive(item, pathname)
           const Icon = item.icon ? ICONS[item.icon] : null
           return (
             <li key={item.href}>

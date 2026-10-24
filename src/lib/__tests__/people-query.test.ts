@@ -22,6 +22,7 @@ describe("parsePeopleQuery", () => {
         page: "-4",
         size: "7",
         dir: "sideways",
+        atRisk: "yes",
       })
     ).toEqual(DEFAULT_PEOPLE_QUERY)
   })
@@ -31,8 +32,10 @@ describe("parsePeopleQuery", () => {
       parsePeopleQuery({
         q: "  priya ",
         status: "active",
+        client: "client_acme",
         role: "role_data_engineer",
         location: "ny",
+        atRisk: "1",
         sort: "status",
         dir: "desc",
         page: "3",
@@ -41,8 +44,10 @@ describe("parsePeopleQuery", () => {
     ).toEqual({
       q: "priya",
       status: "active",
+      client: "client_acme",
       role: "role_data_engineer",
       location: "NY",
+      atRisk: true,
       sort: "status",
       dir: "desc",
       page: 3,
@@ -52,6 +57,12 @@ describe("parsePeopleQuery", () => {
 
   it("takes the first of repeated params", () => {
     expect(parsePeopleQuery({ status: ["inactive", "active"] }).status).toBe("inactive")
+    expect(parsePeopleQuery({ atRisk: ["1", "0"] }).atRisk).toBe(true)
+  })
+
+  it("reads the at-risk filter only from the exact value 1", () => {
+    for (const value of ["0", "true", "", "11", " 1"]) expect(parsePeopleQuery({ atRisk: value }).atRisk, value).toBe(false)
+    expect(peopleSearch({ ...DEFAULT_PEOPLE_QUERY, atRisk: true })).toBe("?atRisk=1")
   })
 })
 
@@ -64,8 +75,10 @@ describe("peopleSearch", () => {
     const query = {
       q: "a b",
       status: "onboarding" as const,
+      client: "client_1",
       role: "role_software_engineer",
       location: "CA",
+      atRisk: true,
       sort: "name" as const,
       dir: "desc" as const,
       page: 2,
@@ -97,11 +110,12 @@ describe("cycleSort", () => {
 })
 
 describe("hasActiveFilters", () => {
-  it("counts search, status and location but not sort or paging", () => {
+  it("counts search, status, location and at risk but not sort or paging", () => {
     expect(hasActiveFilters({ ...DEFAULT_PEOPLE_QUERY, sort: "name", page: 3 })).toBe(false)
     expect(hasActiveFilters({ ...DEFAULT_PEOPLE_QUERY, q: "x" })).toBe(true)
     expect(hasActiveFilters({ ...DEFAULT_PEOPLE_QUERY, location: "TX" })).toBe(true)
     expect(hasActiveFilters({ ...DEFAULT_PEOPLE_QUERY, role: "role_x" })).toBe(true)
+    expect(hasActiveFilters({ ...DEFAULT_PEOPLE_QUERY, atRisk: true })).toBe(true)
   })
 })
 

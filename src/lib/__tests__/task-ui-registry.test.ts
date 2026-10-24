@@ -9,6 +9,7 @@ import {
   roleForPortal,
   taskHref,
   taskOpensIn,
+  taskPageHref,
   taskUiFor,
   TASK_UI_REGISTRY,
   VIEW_FALLBACK,
@@ -32,6 +33,20 @@ function subject(patch: Partial<TaskUiSubject> = {}): TaskUiSubject {
 
 describe("task UI registry", () => {
   const definitions = DEFAULT_WORKFLOW.tasks.map((task) => ({ ...task, type: task.type ?? task.key }))
+
+  it("opens Confirm deposit in Finance's Payments, where the deposit is settled", () => {
+    expect(taskHref(subject({ type: "confirm_deposit" }), "finance")).toBe("/finance/payments")
+  })
+
+  it("never links a Finance task to a task page (there is none): every type, registered or not, opens Payments", () => {
+    expect(taskPageHref(subject({ id: "task_9" }), "finance")).toBe("/finance/payments")
+    for (const type of [...Object.keys(TASK_UI_REGISTRY), "brand_new_type"]) {
+      expect(taskHref(subject({ type }), "finance"), type).not.toMatch(/^\/finance\/tasks\//)
+    }
+    expect(VIEW_FALLBACK.href(subject({ type: "brand_new_type" }), "finance")).toBe("/finance/payments")
+    expect(taskPageHref(subject({ id: "task_9" }), "worker")).toBe("/worker/tasks/task_9")
+    expect(taskPageHref(subject({ id: "task_9" }), "onboarding")).toBe("/onboarding?open=task_9")
+  })
 
   it("registers every task type of the default workflow", () => {
     for (const { type } of definitions) {
@@ -61,7 +76,7 @@ describe("task UI registry", () => {
 
   it("builds a task page link per portal by default", () => {
     expect(taskHref(subject({ type: "w4", id: "t9" }), "worker")).toBe("/worker/tasks/t9")
-    expect(taskHref(subject({ type: "verify_i9_section2", id: "t8" }), "onboarding")).toBe("/onboarding/tasks/t8")
+    expect(taskHref(subject({ type: "verify_i9_section2", id: "t8" }), "onboarding")).toBe("/onboarding?open=t8")
   })
 
   it("sends client dialog tasks to the case page", () => {
@@ -93,7 +108,8 @@ describe("task UI registry", () => {
     expect(VIEW_FALLBACK.rejectable).toBeUndefined()
     for (const portal of PORTALS) {
       expect(taskOpensIn("brand_new_type", portal)).toBe(true)
-      expect(taskHref(subject({ type: "brand_new_type", id: "x" }), portal)).toBe(`/${portal}/tasks/x`)
+      const expected = portal === "onboarding" ? "/onboarding?open=x" : portal === "finance" ? "/finance/payments" : `/${portal}/tasks/x`
+      expect(taskHref(subject({ type: "brand_new_type", id: "x" }), portal)).toBe(expected)
     }
   })
 

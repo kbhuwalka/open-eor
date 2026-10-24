@@ -26,11 +26,13 @@ export function I9RejectForm({
   pending,
   error,
   onSubmit,
+  onCancel,
 }: {
   documents: UploadedDocumentView[]
   pending: boolean
   error: string | null
   onSubmit: (reason: RejectReason) => void
+  onCancel?: () => void
 }) {
   const id = useId()
   const [chosen, setChosen] = useState<string[]>([])
@@ -106,10 +108,15 @@ export function I9RejectForm({
           {error}
         </p>
       ) : null}
-      <div>
+      <div className="flex items-center gap-2">
         <Button type="submit" variant="destructive" disabled={pending} data-testid="send-back">
           {pending ? "Sending back…" : "Send back to employee"}
         </Button>
+        {onCancel ? (
+          <Button type="button" variant="ghost" disabled={pending} onClick={onCancel} data-testid="send-back-cancel">
+            Cancel
+          </Button>
+        ) : null}
       </div>
     </form>
   )

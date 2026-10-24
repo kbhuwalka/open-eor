@@ -1,10 +1,10 @@
 /**
- * Loads one invoice with everything the invoice document prints (docs/client-finance.md §8): the
+ * Loads one invoice with everything the invoice document prints (docs/client-finance.md §2b): the
  * invoice and its lines as stored, who it is for (legal name, job title, work state, start date,
  * last day), the billed company, its payments and the void reason.
  *
- * The invoice page, the drawer, the client PDF and the Finance portal all read through here, so
- * they print the same facts and the same totals.
+ * The client invoice drawer, the client PDF and the Finance portal all read through here, so they
+ * print the same facts and the same totals.
  *
  * ACCESS: this module only scopes the read; it does not check who is asking. `scope.companyId` is
  * the session's client company for a client (an invoice of another company is then `null`, the
@@ -150,7 +150,7 @@ export function invoiceDetailFromSource(source: InvoiceDocumentSource, now: Date
   })
 }
 
-/** The full invoice view for the page, the drawer and `InvoiceDocument`. `null` when out of scope. */
+/** The full invoice view for the drawer and `InvoiceDocument`. `null` when out of scope. */
 export function loadInvoiceDocument(
   db: Reader,
   invoiceId: string,

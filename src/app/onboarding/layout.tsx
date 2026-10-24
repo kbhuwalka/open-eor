@@ -14,11 +14,9 @@ export default function OnboardingLayout({ children }: { children: ReactNode }) 
           label: "Home",
           icon: "home",
           href: "/onboarding",
-          also: ["/onboarding/tasks"],
           count: openTaskCount(getDb(), user),
         },
-        { label: "Cases", icon: "people", href: "/onboarding/cases", prefix: true },
-        { label: "Clients", icon: "finance", href: "/onboarding/clients", prefix: true },
+        { label: "People", icon: "people", href: "/onboarding/people", prefix: true },
       ]}
     >
       {children}

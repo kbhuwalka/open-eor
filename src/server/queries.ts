@@ -8,6 +8,7 @@ import {
   caseDocuments,
   caseEvents,
   clientAgreements,
+  clientCompanies,
   hireRequests,
   onboardingCases,
   roles,
@@ -52,6 +53,8 @@ import { tasksForCase, tasksForCases } from "./tasks"
 
 export type ClientPersonRow = {
   caseId: string
+  clientId: string
+  clientName: string
   workerName: string
   workerEmail: string
   roleName: string
@@ -92,6 +95,8 @@ export type PeoplePage = {
   page: number
   pageSize: number
   totalPages: number
+  /** Clients with at least one person in scope, for the staff Client filter. */
+  clients: { id: string; name: string }[]
   /** Distinct locations at this company, for the filter. */
   locations: string[]
   /** Roles held by at least one person at this company, for the filter. */
@@ -121,6 +126,8 @@ function sortColumn(key: PeopleSortKey, today: string): SQL {
   switch (key) {
     case "name":
       return sql`lower(${users.displayName})`
+    case "client":
+      return sql`lower(${clientCompanies.name})`
     case "role":
       return sql`lower(${roles.name})`
     case "location":
@@ -136,24 +143,72 @@ function likePattern(text: string): string {
 }
 
 /**
- * One page of the client's people: SQL filtering (status, location, name or
- * email search), whitelisted sort, and pagination. The default order is most
- * recent activity first. `now` decides which fixed terms have ended.
+ * The cases in `scope` whose person is onboarding with a start at risk (domain §9.1 O4), derived
+ * from the tasks exactly as a row's `atRisk` is, so the `atRisk` filter, the Home's At risk count
+ * and the flag on each row cannot disagree. Reads only open cases: no other case can be at risk.
+ */
+function atRiskCaseIds(db: AppDatabase, scope: SQL | undefined, now: Date): string[] {
+  const cases = db
+    .select({
+      caseId: onboardingCases.id,
+      lifecycle: onboardingCases.lifecycle,
+      startDate: hireRequests.startDate,
+      endDate: hireRequests.endDate,
+    })
+    .from(onboardingCases)
+    .innerJoin(hireRequests, eq(hireRequests.id, onboardingCases.hireRequestId))
+    .where(and(scope, eq(onboardingCases.lifecycle, "open")))
+    .all()
+  const tasksByCase = tasksForCases(db, cases.map((row) => row.caseId))
+  return cases
+    .filter((row) => {
+      const projection = projectTasks(tasksByCase.get(row.caseId) ?? [], { now, startDate: row.startDate })
+      const status = personStatusFor({ lifecycle: row.lifecycle, goLiveReached: projection.goLiveReached, endDate: row.endDate, now })
+      return status === "onboarding" && atRiskMessage(projection, now) !== null
+    })
+    .map((row) => row.caseId)
+}
+
+/** What the client Home's Onboarding and At risk cards count: the same people `listPeople` lists under `status=onboarding` and `atRisk=1`. */
+export type PeopleCounts = { onboarding: number; atRisk: number }
+
+/** Onboarding people of one company, and how many of them have a start at risk. */
+export function peopleCounts(db: AppDatabase, clientCompanyId: string, now: Date = new Date()): PeopleCounts {
+  const scope = eq(hireRequests.clientCompanyId, clientCompanyId)
+  const onboarding =
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(onboardingCases)
+      .innerJoin(hireRequests, eq(hireRequests.id, onboardingCases.hireRequestId))
+      .where(and(scope, statusCondition("onboarding", todayIso(now))))
+      .get()?.n ?? 0
+  return { onboarding, atRisk: atRiskCaseIds(db, scope, now).length }
+}
+
+/**
+ * One page of people: SQL filtering (status, role, location, name or email search; at risk by
+ * the case ids `atRiskCaseIds` derives from the tasks), whitelisted sort, and pagination. The
+ * default order is most recent activity first. `now` decides which fixed terms have ended. `clientCompanyId` scopes the list to one company (the
+ * client portal, which also ignores `query.client`); `null` is every company, for the staff list,
+ * and the caller must have checked the viewer's role.
  */
 export function listPeople(
   db: AppDatabase,
-  clientCompanyId: string,
+  clientCompanyId: string | null,
   query: PeopleQuery,
   now: Date = new Date()
 ): PeoplePage {
   const today = todayIso(now)
-  const scope = eq(hireRequests.clientCompanyId, clientCompanyId)
-  const conditions: SQL[] = [scope]
+  const scope = clientCompanyId === null ? undefined : eq(hireRequests.clientCompanyId, clientCompanyId)
+  const conditions: SQL[] = scope ? [scope] : []
+  const company = clientCompanyId === null && query.client ? eq(hireRequests.clientCompanyId, query.client) : undefined
+  if (company) conditions.push(company)
   if (query.status) {
     conditions.push(statusCondition(query.status, today))
   }
   if (query.role) conditions.push(eq(hireRequests.roleId, query.role))
   if (query.location) conditions.push(eq(hireRequests.stateCode, query.location))
+  if (query.atRisk) conditions.push(inArray(onboardingCases.id, atRiskCaseIds(db, and(scope, company), now)))
   if (query.q) {
     const pattern = likePattern(query.q)
     conditions.push(
@@ -169,6 +224,7 @@ export function listPeople(
       .innerJoin(hireRequests, eq(hireRequests.id, onboardingCases.hireRequestId))
       .innerJoin(users, eq(users.id, onboardingCases.workerUserId))
       .innerJoin(roles, eq(roles.id, hireRequests.roleId))
+      .innerJoin(clientCompanies, eq(clientCompanies.id, hireRequests.clientCompanyId))
       .where(condition)
       .get()?.n ?? 0
 
@@ -185,6 +241,8 @@ export function listPeople(
   const pageRows = db
     .select({
       caseId: onboardingCases.id,
+      clientId: clientCompanies.id,
+      clientName: clientCompanies.name,
       workerName: users.displayName,
       workerEmail: users.email,
       roleName: roles.name,
@@ -199,6 +257,7 @@ export function listPeople(
     .innerJoin(hireRequests, eq(hireRequests.id, onboardingCases.hireRequestId))
     .innerJoin(users, eq(users.id, onboardingCases.workerUserId))
     .innerJoin(roles, eq(roles.id, hireRequests.roleId))
+    .innerJoin(clientCompanies, eq(clientCompanies.id, hireRequests.clientCompanyId))
     .where(where)
     .orderBy(...order)
     .limit(query.size)
@@ -240,6 +299,16 @@ export function listPeople(
     }
   })
 
+  const clients =
+    clientCompanyId === null
+      ? db
+          .selectDistinct({ id: clientCompanies.id, name: clientCompanies.name })
+          .from(hireRequests)
+          .innerJoin(clientCompanies, eq(clientCompanies.id, hireRequests.clientCompanyId))
+          .orderBy(asc(sql`lower(${clientCompanies.name})`))
+          .all()
+      : []
+
   const locations = db
     .selectDistinct({ code: hireRequests.stateCode })
     .from(hireRequests)
@@ -256,7 +325,7 @@ export function listPeople(
     .orderBy(asc(sql`lower(${roles.name})`))
     .all()
 
-  return { rows, total, companyTotal, page, pageSize: query.size, totalPages, locations, roleOptions }
+  return { rows, total, companyTotal, page, pageSize: query.size, totalPages, clients, locations, roleOptions }
 }
 
 /** EOR staff are never named to the client; the CSM is the single contact. */

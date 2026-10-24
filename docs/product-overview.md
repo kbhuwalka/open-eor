@@ -31,7 +31,7 @@ Separation of duties `onboarding_specialist ≠ finance` (specialists run onboar
 ## 4. Hire chain (end-to-end flow)
 
 1. **Order** — `client_hr` enters the person's details, picks or creates a role, sets comp/location/package and a desired start date at least 5 business days out and an employment term (indefinite, or fixed with an end date after the start date), reviews a quote (salary, statutory employer costs and the percent service fee, in dollars; for a fixed term also the total for the term; benefits are determined after enrollment) and the agreement, and creates the order. Wage safeguards run; a **policy snapshot** is frozen; the order instantiates a graph of tasks from the workflow template.
-2. **Client tasks** — accept the master EOR agreement if still unsigned, and pay the deposit (a faked ACH payment of the deposit invoice), both inline on the person's Onboarding tab.
+2. **Client tasks** — accept the master EOR agreement if still unsigned, and pay the deposit (a faked ACH payment of the deposit invoice), both from **To do** on the client's Home (`/client`, the dialog opens in place) or inline on the person's Onboarding tab. Above To do, the Home has three glance cards: how many people are onboarding, how many of their starts are at risk (each opening the People list filtered to exactly those people) and the invoices due (opening Finance, where they are paid); the people list is `/client/people` ([task-inbox.md](./task-inbox.md) §8).
 3. **Specialist, Finance and system tasks** — an `onboarding_specialist` reviews the order and `finance` confirms the deposit payment settled; the system generates the employment agreement (with the client's signature) and invites the worker.
 4. **Worker tasks** — the worker accepts the invitation, signs the agreement, gives personal details, I-9 Section 1 and List A **or** List B + List C uploads, W-4 and direct deposit.
 5. **Verify** — an `onboarding_specialist` verifies I-9 Section 2; a rejection with a reason code sends a fix task to the worker and a new review behind it.
@@ -68,7 +68,7 @@ An agent MUST NOT add any of the above "helpfully". A new capability requires a 
 
 The product is "done" for the demo when all of the following are provable with seed data from a cold start:
 
-1. Seeded users of every role (client HR, two onboarding specialists, two Finance users, employees) can be picked from `/pick`; each lands on its own portal; cross-portal access is refused server-side.
+1. Seeded users of every role (a client HR user per company, the onboarding specialist, the Finance user, employees) can be picked from `/pick`; each lands on its own portal (the client on Home: what needs them, what others are doing, what to pay; Finance on its Home: what to settle, what is overdue, what is ready to bill, and the payments waiting on it with Settle); cross-portal access is refused server-side.
 2. `client_hr` starts a hire by entering a new person's name and email, a role and a desired start date at least 5 business days out; a hire below the wage floor is refused with a clear error; the person appears with a status, a task list and a timeline but no document links.
 3. `onboarding_specialist` completes its tasks and cannot complete Finance's `confirm_deposit`; `finance` cannot complete or reject specialist tasks (no UI control and the server returns `FORBIDDEN_ROLE`).
 4. `worker` cannot complete a task that is not ready, or upload an invalid List combination.

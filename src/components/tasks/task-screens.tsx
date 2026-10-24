@@ -7,7 +7,6 @@ import type { ActionResult } from "@/server/action-result"
 import type { TaskOutcome } from "@/server/task-actions"
 
 import { EmployeeTaskScreen } from "../employee-tasks/employee-task-screen"
-import { SpecialistTaskScreen } from "../onboarding-portal/specialist-task-screen"
 import { DialogTaskScreen } from "./dialog-task-screen"
 import { TASK_DIALOGS } from "./task-dialogs"
 import { TaskDetailFallback } from "./task-detail-fallback"
@@ -58,11 +57,6 @@ export const TASK_SCREENS: Readonly<Record<string, TaskScreen>> = {
   w4: EmployeeTaskScreen,
   direct_deposit: EmployeeTaskScreen,
   benefits_decision: EmployeeTaskScreen,
-  review_order: SpecialistTaskScreen,
-  verify_i9_section2: SpecialistTaskScreen,
-  setup_payroll: SpecialistTaskScreen,
-  file_new_hire_report: SpecialistTaskScreen,
-  submit_benefit_enrollments: SpecialistTaskScreen,
 }
 
 /** The screen for a task type: registered, else its dialog behind a button, else the read-only fallback. */

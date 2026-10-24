@@ -30,6 +30,17 @@ export type EmployeeUploadView = {
   href: string
   /** `uploaded`: waiting for Northwind; `accepted`: verified; `rejected`: Northwind sent it back; `replaced`: superseded. */
   status: "uploaded" | "accepted" | "rejected"
+  /** What the employee entered about the document; null for an upload made before details were asked for. */
+  details: UploadDetailsView | null
+}
+
+export type UploadDetailsView = {
+  title: string
+  issuingAuthority: string
+  /** `•••• 6789`; the full number never reaches the browser. */
+  maskedNumber: string
+  /** `YYYY-MM-DD`, null when the document has no expiration date. */
+  expiresOn: string | null
 }
 
 export type BenefitElectionView = {

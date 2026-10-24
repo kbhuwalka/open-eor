@@ -48,6 +48,7 @@ export async function payInvoicesAction(invoiceIds: unknown): Promise<ActionResu
     }
     revalidatePath("/client/finance")
     revalidatePath("/client/people/[caseId]", "page")
+    revalidatePath("/client")
     return {
       ok: true,
       data: { paymentId: result.paymentId, invoiceIds: result.invoiceIds, totalCents: result.totalCents },

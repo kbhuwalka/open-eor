@@ -1,6 +1,6 @@
 import { Skeleton } from "@/components/ui/skeleton"
 
-/** Mirrors `TaskInboxTable`: search and three filters, header band, a few rows (ui-guidelines L2a). */
+/** The Onboarding home while it loads: search and three filters, then a few rows (ui-guidelines L2a). */
 export function TaskInboxSkeleton() {
   return (
     <div className="flex flex-col gap-4" aria-busy data-testid="task-inbox-skeleton">
@@ -41,24 +41,6 @@ export function TaskTodoSkeleton() {
         <Skeleton className="h-12 w-full rounded-lg" />
         <Skeleton className="h-12 w-full rounded-lg" />
       </div>
-    </div>
-  )
-}
-
-/** Mirrors `AttentionPanel`: heading and two rows. */
-export function AttentionSkeleton() {
-  return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border p-4" aria-busy data-testid="attention-skeleton">
-      <Skeleton className="h-4 w-40" />
-      {[0, 1].map((i) => (
-        <div key={i} className="flex items-center justify-between gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Skeleton className="h-4 w-52" />
-            <Skeleton className="h-3 w-36" />
-          </div>
-          <Skeleton className="h-8 w-28" />
-        </div>
-      ))}
     </div>
   )
 }

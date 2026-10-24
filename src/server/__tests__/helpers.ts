@@ -11,6 +11,7 @@ import { afterEach } from "vitest"
 
 import type { SessionUser } from "@/auth/session"
 import { caseDocuments, createDb, SEED_COMPANIES, SEED_IDS, users, type AppDatabase } from "@/db"
+import type { IdentityDocumentDetails, IdentityListKind } from "@/domain/forms"
 import { createRng, samplePayload, type Task } from "@/domain/tasks"
 import type { DocumentKind } from "@/domain/types"
 
@@ -108,6 +109,22 @@ export function orderInput(patch: Partial<CreateOrderInput> = {}): CreateOrderIn
   }
 }
 
+/** What an employee would enter for each list's sample document (valid, far from expiring). */
+export const SAMPLE_IDENTITY_DETAILS: Record<IdentityListKind, IdentityDocumentDetails> = {
+  list_a: { title: "U.S. Passport", issuingAuthority: "U.S. Department of State", number: "583920174", expiresOn: "2034-05-15" },
+  list_b: { title: "Driver's license", issuingAuthority: "California DMV", number: "D4471920", expiresOn: "2031-01-31" },
+  list_c: {
+    title: "Social Security Account Number card (unrestricted)",
+    issuingAuthority: "Social Security Administration",
+    number: "123-45-6789",
+    expiresOn: null,
+  },
+}
+
+export function sampleDetailsFor(kind: DocumentKind): IdentityDocumentDetails | null {
+  return kind === "list_a" || kind === "list_b" || kind === "list_c" ? SAMPLE_IDENTITY_DETAILS[kind] : null
+}
+
 export type Driver = ReturnType<typeof makeDriver>
 
 /** Finishes tasks for one case as the right party. Time moves forward an hour per task. */
@@ -119,8 +136,9 @@ export function makeDriver(db: AppDatabase, deps: CaseServiceDeps, clock: Clock,
     specialist: sessionUser(db, SEED_IDS.users.specialist),
     finance: sessionUser(db, SEED_IDS.users.finance),
   }
-  const upload = (kind: DocumentKind, fileName: string) =>
-    uploadCaseDocument(deps, { actor: actors.worker, caseId, kind, fileName, storagePath: `data/uploads/${fileName}` })
+  /** Records an upload with sample details for List A/B/C; pass `null` for a legacy upload without them. */
+  const upload = (kind: DocumentKind, fileName: string, details: IdentityDocumentDetails | null = sampleDetailsFor(kind)) =>
+    uploadCaseDocument(deps, { actor: actors.worker, caseId, kind, fileName, storagePath: `data/uploads/${fileName}`, details })
 
   function payloadFor(task: Task, party: keyof typeof actors): unknown {
     const documents = db

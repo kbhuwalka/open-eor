@@ -3,7 +3,9 @@ import { Suspense, type ReactNode } from "react"
 import { requirePortalUser } from "@/auth"
 import { PortalShell, type NavItem } from "@/components/portal-shell"
 import { ThemeRoot } from "@/components/theme-root"
+import { getDb } from "@/db"
 import type { UserRole } from "@/domain/types"
+import { listPickerPersonas, personaOf } from "@/server/personas"
 
 /**
  * Shared body for the four portal layouts: guard, theme, shell, nav.
@@ -42,9 +44,10 @@ async function Guard({
 }) {
   const user = await requirePortalUser(role)
   const items = typeof nav === "function" ? nav(user) : nav
+  const db = getDb()
   return (
     <ThemeRoot>
-      <PortalShell user={user} nav={items}>
+      <PortalShell persona={personaOf(db, user)} personas={listPickerPersonas(db)} nav={items}>
         {children}
       </PortalShell>
     </ThemeRoot>

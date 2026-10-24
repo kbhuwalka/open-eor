@@ -1,7 +1,7 @@
 /**
  * What an invoice line says, in words, derived from the numbers it was calculated from
- * (docs/client-finance.md §8). Pure and shared by the invoice page, the drawer and the PDF, so all
- * three print the same thing.
+ * (docs/client-finance.md §2b). Pure and shared by the invoice drawer, `InvoiceDocument` and the PDF,
+ * so all three print the same thing.
  *
  * Nothing here knows a rate: every percentage, wage base and amount in the text is read from the
  * line's stored `inputs` (billing-and-invoicing.md I2) and formatted. A line whose inputs are

@@ -26,7 +26,7 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>
 
 /**
  * The generic task route, shared by `/client/tasks/[taskId]`, `/worker/tasks/[taskId]`,
- * `/onboarding/tasks/[taskId]` and `/finance/tasks/[taskId]` (task-inbox.md §4). It loads the task for
+ * `/onboarding/tasks/[taskId]` (task-inbox.md §4). It loads the task for
  * the session user (`loadTaskPage`: portal, registry and actor/assignee checks; anything that fails is
  * a 404), picks the screen for its type (`screenFor`) and hands it the viewer-scoped data plus
  * Server Actions bound to this task. No portal page re-implements any of this. `searchParams` carries

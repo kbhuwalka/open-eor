@@ -67,6 +67,7 @@ export function ActionDialog<T>({
   const [pending, start] = useTransition()
 
   function handleOpenChange(next: boolean) {
+    if (!next && pending) return
     onOpenChange(next)
     if (next) {
       setText("")
@@ -137,7 +138,9 @@ export function ActionDialog<T>({
           </Alert>
         ) : null}
         <DialogFooter>
-          <DialogClose render={<Button variant="outline" />}>{cancelLabel}</DialogClose>
+          <DialogClose render={<Button variant="outline" disabled={pending} />} data-testid="action-cancel">
+            {cancelLabel}
+          </DialogClose>
           <Button
             variant={tone === "danger" ? "danger" : "default"}
             disabled={pending}

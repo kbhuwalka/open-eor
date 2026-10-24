@@ -38,7 +38,7 @@ function latestByKey(tasks: readonly TaskLite[]): Map<string, TaskLite> {
 
 const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? name
 
-export const caseHref = (caseId: string, tab?: string) => `/onboarding/cases/${caseId}${tab ? `?tab=${tab}` : ""}`
+export const caseHref = (caseId: string, tab?: string) => `/onboarding/people/${caseId}${tab ? `?tab=${tab}` : ""}`
 
 export function preflightItems(input: PreflightInput): PreflightItem[] {
   const latest = latestByKey(input.tasks)
@@ -101,7 +101,7 @@ export function preflightItems(input: PreflightInput): PreflightItem[] {
       : i9Task?.status === "ready"
         ? "Documents are ready to verify"
         : `Waiting on ${worker} to upload identity documents`,
-    href: i9Task && i9Task.status === "ready" ? `/onboarding/tasks/${i9Task.id}` : caseHref(input.caseId, "documents"),
+    href: i9Task && i9Task.status === "ready" ? `/onboarding?open=${i9Task.id}` : caseHref(input.caseId, "documents"),
   }
 
   return [agreement, deposit, w4, directDeposit, i9]

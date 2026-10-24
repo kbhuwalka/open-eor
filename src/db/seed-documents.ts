@@ -6,12 +6,15 @@
  */
 import zlib from "node:zlib"
 
+import type { IdentityDocumentDetails } from "@/domain/forms"
+
 export type SampleListKind = "list_a" | "list_b" | "list_c"
 
 export type SampleIdentityFile = {
   fileName: string
   declaredType: "image/png" | "application/pdf"
   bytes: Uint8Array
+  details: IdentityDocumentDetails
 }
 
 const GLYPHS: Record<string, string> = {
@@ -236,14 +239,37 @@ function encodePdf(lines: { text: string; size: number; gap: number }[]): Uint8A
   return new Uint8Array(Buffer.from(body, "latin1"))
 }
 
+const LICENSE_ISSUERS = [
+  { code: "TX", authority: "Texas DPS" },
+  { code: "CA", authority: "California DMV" },
+  { code: "NY", authority: "New York DMV" },
+  { code: "WA", authority: "Washington DOL" },
+] as const
+
+/** A far-future expiry, so a seeded document stays current whenever the demo runs. */
+function expiryFor(seed: string): string {
+  return `20${32 + (hashOf(seed) % 5)}-0${1 + (hashOf(`${seed}:m`) % 9)}-15`
+}
+
+/** Nine digits in the ranges the SSA issues (area 001-665, group 01-99, serial 0001-9999). */
+function ssnFor(seed: string): string {
+  const area = String(1 + (hashOf(`${seed}:a`) % 665)).padStart(3, "0")
+  const group = String(1 + (hashOf(`${seed}:b`) % 99)).padStart(2, "0")
+  const serial = String(1 + (hashOf(`${seed}:c`) % 9999)).padStart(4, "0")
+  return `${area}-${group}-${serial}`
+}
+
 /**
- * A specimen document of the given I-9 list for a fake `holder`. The same holder and kind always
- * produce the same bytes, so a reseed rewrites identical files.
+ * A specimen document of the given I-9 list for a fake `holder`, with the details printed on it
+ * (what the employee enters at upload). The same holder and kind always produce the same bytes,
+ * so a reseed rewrites identical files.
  */
 export function sampleIdentityFile(kind: SampleListKind, holder: string, revision = 1): SampleIdentityFile {
   const seed = `${kind}:${holder}:${revision}`
   const note = revision > 1 ? `SPECIMEN - REPLACEMENT ${revision}` : "SPECIMEN - NOT A REAL DOCUMENT"
   if (kind === "list_a") {
+    const number = digitsFor(seed, 9)
+    const expiresOn = expiryFor(seed)
     return {
       fileName: "list-a-passport.png",
       declaredType: "image/png",
@@ -252,29 +278,35 @@ export function sampleIdentityFile(kind: SampleListKind, holder: string, revisio
         band: [31, 58, 110],
         holder,
         lines: [
-          ["DOCUMENT NO", digitsFor(seed, 9)],
-          ["EXPIRES", `20${30 + (hashOf(seed) % 5)}-0${1 + (hashOf(`${seed}:m`) % 9)}-15`],
+          ["DOCUMENT NO", number],
+          ["EXPIRES", expiresOn],
         ],
         specimen: note,
       }),
+      details: { title: "U.S. Passport", issuingAuthority: "U.S. Department of State", number, expiresOn },
     }
   }
   if (kind === "list_b") {
+    const issuer = LICENSE_ISSUERS[hashOf(holder) % LICENSE_ISSUERS.length]
+    const number = `D${digitsFor(seed, 8)}`
+    const expiresOn = expiryFor(seed)
     return {
       fileName: "list-b-drivers-license.png",
       declaredType: "image/png",
       bytes: card({
-        title: "DRIVER LICENSE",
+        title: `${issuer.code} DRIVER LICENSE`,
         band: [28, 98, 90],
         holder,
         lines: [
-          ["LICENSE NO", `D${digitsFor(seed, 8)}`],
-          ["CLASS", "C"],
+          ["LICENSE NO", number],
+          ["EXPIRES", expiresOn],
         ],
         specimen: note,
       }),
+      details: { title: "Driver's license", issuingAuthority: issuer.authority, number, expiresOn },
     }
   }
+  const number = ssnFor(seed)
   return {
     fileName: "list-c-social-security-card.pdf",
     declaredType: "application/pdf",
@@ -282,9 +314,15 @@ export function sampleIdentityFile(kind: SampleListKind, holder: string, revisio
       { text: "SOCIAL SECURITY CARD", size: 22, gap: 44 },
       { text: "This number has been established for", size: 12, gap: 18 },
       { text: holder.toUpperCase(), size: 20, gap: 44 },
-      { text: `${digitsFor(seed, 3)}-${digitsFor(`${seed}:b`, 2)}-${digitsFor(`${seed}:c`, 4)}`, size: 16, gap: 56 },
+      { text: number, size: 16, gap: 56 },
       { text: note, size: 12, gap: 18 },
       { text: "Generated sample for the demo. It is not a real identity document.", size: 10, gap: 14 },
     ]),
+    details: {
+      title: "Social Security Account Number card (unrestricted)",
+      issuingAuthority: "Social Security Administration",
+      number,
+      expiresOn: null,
+    },
   }
 }

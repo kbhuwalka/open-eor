@@ -6,7 +6,7 @@ import { openLiveDb, signInAs } from "./support/live"
 /**
  * The Onboarding specialist portal on the real pages, as Sam Ortiz: review an order, verify an I-9
  * (send a document back and see the rework appear, accept another with a typed e-signature), set up
- * payroll, read a case and filter the directory. It WRITES, so run it against a COPY of the seeded
+ * payroll, read a case and filter the people list. It WRITES, so run it against a COPY of the seeded
  * database:
  *
  *   cp data/eor.sqlite /tmp/specialist-copy.sqlite
@@ -58,6 +58,14 @@ test.beforeEach(async ({ context, baseURL, page }) => {
   await page.waitForURL(/\/onboarding/)
 })
 
+/** Opens a task straight in the home's drawer and waits for its body to load. */
+async function openTask(page: Page, taskId: string) {
+  await page.goto(`/onboarding?open=${taskId}`)
+  await expect(page.getByTestId("task-drawer")).toBeVisible()
+  await expect(page.getByTestId("drawer-body")).toBeVisible()
+  await expect(page.getByTestId("drawer-loading")).toHaveCount(0)
+}
+
 async function signInPopup(page: Page) {
   const dialog = page.getByTestId("signing-dialog")
   await expect(dialog).toBeVisible()
@@ -74,39 +82,21 @@ async function signInPopup(page: Page) {
   await finish.click()
 }
 
-async function continueToReview(page: Page) {
-  const review = page.getByTestId("review-step")
-  for (let step = 0; step < 6 && !(await review.isVisible()); step += 1) {
-    await page.getByTestId("wizard-continue").click()
-    await page.waitForTimeout(150)
-  }
-  await expect(review).toBeVisible()
-}
-
-test("home shows the summary row and the task inbox, and the nav lists every page", async ({ page }) => {
+test("home lists the tasks and the nav has Home and People, with no Clients page", async ({ page }) => {
   const nav = page.getByRole("navigation")
-  for (const label of ["Home", "Cases", "Clients"]) await expect(nav.getByRole("link", { name: new RegExp(`^${label}`) })).toBeVisible()
-  for (const tile of ["open", "overdue", "at-risk", "starting"]) await expect(page.getByTestId(`tile-${tile}`)).toBeVisible()
-  await expect(page.getByTestId("tile-open-value")).toHaveText(/^\d+$/)
+  for (const label of ["Home", "People"]) await expect(nav.getByRole("link", { name: new RegExp(`^${label}`) })).toBeVisible()
+  await expect(nav.getByRole("link", { name: /^(Cases|Clients)/ })).toHaveCount(0)
   await expect(page.getByTestId("task-inbox")).toBeVisible()
-  for (const filter of ["client-filter", "task-filter", "status-filter"]) await expect(page.getByTestId(filter)).toBeVisible()
+  for (const filter of ["client-filter", "task-filter", "status-filter", "group-select"]) await expect(page.getByTestId(filter)).toBeVisible()
   await expect(page.getByTestId("task-row").first()).toBeVisible()
   await shot(page, "home")
+  for (const path of ["/onboarding/clients", "/onboarding/cases", "/onboarding/tasks/anything"]) {
+    const response = await page.goto(path)
+    expect(response?.status()).toBe(404)
+  }
 })
 
-test("clients and a client page list their people", async ({ page }) => {
-  await page.getByRole("navigation").getByRole("link", { name: /^Clients/ }).click()
-  await expect(page.getByTestId("clients-table")).toBeVisible()
-  await shot(page, "clients")
-  const rows = page.getByTestId("client-row")
-  expect(await rows.count()).toBeGreaterThan(0)
-  await rows.first().getByRole("link").first().click()
-  await expect(page.getByTestId("client-detail")).toBeVisible()
-  await expect(page.getByTestId("client-case-row").first()).toBeVisible()
-  await shot(page, "client-detail")
-})
-
-test("other roles get no specialist task page, case page or document", async ({ browser, baseURL, page }) => {
+test("other roles cannot open a specialist task, a case page or a document", async ({ browser, baseURL, page }) => {
   const database = await openLiveDb(page)
   const task = tasksOf(database, "review_order", "ready")[0]
   const upload = one<{ id: string }>(database, "select id from case_documents limit 1")
@@ -118,12 +108,11 @@ test("other roles get no specialist task page, case page or document", async ({ 
       await other.goto("/pick")
       await other.getByRole("button", { name: who }).click()
       await other.waitForURL(/\/(client|finance)/)
-      for (const path of [`/onboarding/tasks/${task.id}`, `/onboarding/cases/${task.caseId}`, "/onboarding/cases", "/onboarding/clients"]) {
+      for (const path of [`/onboarding?open=${task.id}`, `/onboarding/people/${task.caseId}`, "/onboarding/people"]) {
         const response = await other.goto(path)
-        await expect(other.getByTestId("task-screen")).toHaveCount(0)
+        await expect(other.getByTestId("task-drawer")).toHaveCount(0)
         await expect(other.getByTestId("case-detail")).toHaveCount(0)
-        await expect(other.getByTestId("cases-directory")).toHaveCount(0)
-        if (response?.status() !== 404) await expect(other).not.toHaveURL(new RegExp(`${path}$`))
+        if (response?.status() !== 404) await expect(other).not.toHaveURL(new RegExp(`${path.replace("?", "\\?")}$`))
       }
       if (upload) {
         const file = await other.request.get(`/api/staff/documents/${upload.id}`)
@@ -135,30 +124,22 @@ test("other roles get no specialist task page, case page or document", async ({ 
   }
 })
 
-test("reviewing an order shows the checks and approving it completes the task", async ({ page }) => {
+test("reviewing an order shows what was ordered and approving it completes the task in the drawer", async ({ page }) => {
   const database = await openLiveDb(page)
   const [task] = tasksOf(database, "review_order", "ready")
   expect(task, "a seeded order waiting for review").toBeTruthy()
 
-  await page.goto(`/onboarding/tasks/${task.id}`)
-  await expect(page.getByTestId("task-screen")).toHaveAttribute("data-task-type", "review_order")
-  await expect(page.getByTestId("order-summary")).toContainText(task.person)
-  await expect(page.getByTestId("order-money")).toContainText("Deposit")
-  await expect(page.getByTestId("order-money")).toContainText("Client agreement")
-  const checks = page.getByTestId("order-checks")
-  for (const id of ["location", "wage_floor", "snapshot", "start_date"]) await expect(checks.getByTestId(`check-${id}`)).toBeVisible()
+  await openTask(page, task.id)
+  await expect(page.getByTestId("drawer-body")).toHaveAttribute("data-task-type", "review_order")
+  await expect(page.getByTestId("task-drawer")).toContainText(task.person)
+  const summary = page.getByTestId("order-summary")
+  for (const label of ["Role", "Work location", "Pay", "Benefits", "Deposit"]) await expect(summary).toContainText(label)
+  await expect(page.getByTestId("order-checks")).toBeVisible()
   await shot(page, "review-order")
 
-  await page.getByTestId("approve-note").fill("Wage and location checked.")
   await page.getByTestId("approve-order").click()
-  await expect(page.getByTestId("task-notice")).toBeVisible({ timeout: 30_000 })
-  expect(statusOf(database, task.id)).toBe("done")
-  const result = one<{ result: string | null }>(database, "select result_json result from tasks where id = ?", task.id)
-  expect(result?.result ?? "").toContain("Wage and location checked.")
-
-  await page.goto(`/onboarding/tasks/${task.id}`)
-  await expect(page.getByTestId("order-approved")).toBeVisible()
-  await expect(page.getByTestId("approve-order")).toHaveCount(0)
+  await expect.poll(() => statusOf(database, task.id), { timeout: 30_000 }).toBe("done")
+  await expect(page.getByTestId("task-drawer").getByTestId("drawer-body")).not.toContainText(task.person)
 })
 
 let rejected: { taskId: string; caseId: string; workerId: string; person: string; note: string } | undefined
@@ -170,20 +151,18 @@ test("sending an I-9 document back opens rework for the employee and a new verif
   expect(task, "a seeded I-9 waiting for verification").toBeTruthy()
   const note = "The photo is cut off on the right-hand side."
 
-  await page.goto(`/onboarding/tasks/${task.id}`)
-  await expect(page.getByTestId("task-screen")).toHaveAttribute("data-task-type", "verify_i9_section2")
+  await openTask(page, task.id)
+  await expect(page.getByTestId("drawer-body")).toHaveAttribute("data-task-type", "verify_i9_section2")
   await expect(page.getByTestId("document-viewer")).toBeVisible()
   await expect(page.getByTestId("employee-details")).toBeVisible()
-  await expect(page.getByTestId("i9-checklist")).toBeVisible()
-  const zoom = page.getByTestId("zoom-level")
-  const before = await zoom.innerText()
-  await page.getByTestId("zoom-in").click()
-  expect(await zoom.innerText()).not.toBe(before)
-  await page.getByTestId("zoom-out").click()
-  await expect(zoom).toHaveText(before)
+  await expect(page.getByTestId("viewer-open")).toHaveAttribute("target", "_blank")
+  await expect(page.locator('[data-testid^="document-details-"]').first()).toBeVisible()
+  await expect(page.getByTestId("drawer-body").getByRole("tablist", { name: "Decision" })).toHaveCount(0)
+  await expect(page.getByTestId("drawer-body").getByRole("textbox")).toHaveCount(0)
+  await expect(page.getByTestId("verify-and-sign")).toBeVisible()
   await shot(page, "i9-verify")
 
-  await page.getByTestId("decision-reject").click()
+  await page.getByTestId("open-send-back").click()
   await page.getByTestId("send-back").click()
   await expect(page.getByTestId("reject-problem")).toBeVisible()
   expect(statusOf(database, task.id)).toBe("ready")
@@ -195,9 +174,7 @@ test("sending an I-9 document back opens rework for the employee and a new verif
   await page.getByTestId("reject-note").fill(note)
   await shot(page, "i9-send-back")
   await page.getByTestId("send-back").click()
-  await expect(page.getByTestId("task-notice")).toBeVisible({ timeout: 30_000 })
-
-  expect(statusOf(database, task.id)).toBe("rejected")
+  await expect.poll(() => statusOf(database, task.id), { timeout: 30_000 }).toBe("rejected")
   const tasks = all<{ id: string; key: string; type: string; status: string; party: string }>(
     database,
     "select id, key, type, status, party from tasks where case_id = ? order by seq",
@@ -211,7 +188,7 @@ test("sending an I-9 document back opens rework for the employee and a new verif
   rejected = { taskId: task.id, caseId: task.caseId, workerId: task.userId, person: task.person, note }
 
   // The case page shows the rework, and the rejected step with its reason.
-  await page.goto(`/onboarding/cases/${task.caseId}`)
+  await page.goto(`/onboarding/people/${task.caseId}`)
   await expect(page.getByTestId("case-detail")).toBeVisible()
   await expect(page.getByTestId("case-task-rework").first()).toBeVisible()
   await shot(page, "case-tasks-rework")
@@ -227,13 +204,6 @@ test("sending an I-9 document back opens rework for the employee and a new verif
   } finally {
     await context.close()
   }
-
-  // The replacement verification is the next one in the specialist's history for that person.
-  await page.goto(`/onboarding/tasks/${replacement.id}`)
-  await expect(page.getByTestId("task-waiting-note")).toBeVisible()
-  await expect(page.getByTestId("rejection-history")).toBeVisible()
-  await expect(page.getByTestId("rejection-entry").first()).toContainText("Document not legible")
-  await shot(page, "i9-replacement-blocked")
 })
 
 test("accepting an I-9 records Section 2 with a typed e-signature and a hash-verified copy", async ({ page }) => {
@@ -242,29 +212,22 @@ test("accepting an I-9 records Section 2 with a typed e-signature and a hash-ver
   const [task] = tasksOf(database, "verify_i9_section2", "ready").filter((row) => row.caseId !== rejected?.caseId)
   expect(task, "a second seeded I-9 waiting for verification").toBeTruthy()
 
-  await page.goto(`/onboarding/tasks/${task.id}`)
-  await expect(page.getByTestId("accept-panel")).toBeVisible()
-  const listA = await page.getByTestId("i9-mode-a").isChecked()
-  if (listA) {
-    await page.getByTestId("listA.0-title").fill("U.S. Passport")
-    await page.getByTestId("listA.0-authority").fill("U.S. Department of State")
-    await page.getByTestId("listA.0-number").fill("X1234567")
-  } else {
-    await expect(page.getByTestId("i9-mode-bc")).toBeChecked()
-    await page.getByTestId("listB-title").fill("Driver's license")
-    await page.getByTestId("listB-authority").fill("State of California")
-    await page.getByTestId("listB-number").fill("D1234567")
-    await page.getByTestId("listC-title").fill("Social Security card")
-    await page.getByTestId("listC-authority").fill("Social Security Administration")
-  }
+  await openTask(page, task.id)
+  const numbers = (await page.getByTestId("document-number").allInnerTexts()).map((text) => text.trim())
+  expect(numbers.length, "the employee's document numbers, shown read-only").toBeGreaterThan(0)
+  for (const number of numbers) expect(number).not.toContain("•")
+  const ssnCard = page.getByTestId("document-details-list_c").filter({ hasText: "Social Security Account Number card" })
+  if (await ssnCard.count()) await expect(ssnCard.getByTestId("document-number")).toHaveText(/^\*\*\*-\*\*-\d{4}$/)
   await shot(page, "i9-accept-documents")
-  await continueToReview(page)
-  await shot(page, "i9-accept-review")
-  await page.getByTestId("review-and-sign").click()
+  await page.getByTestId("verify-and-sign").click()
   await signInPopup(page)
-  await expect(page.getByTestId("task-notice")).toBeVisible({ timeout: 60_000 })
-
-  expect(statusOf(database, task.id)).toBe("done")
+  await expect.poll(() => statusOf(database, task.id), { timeout: 60_000 }).toBe("done")
+  const result = one<{ result: string | null }>(database, "select result_json result from tasks where id = ?", task.id)
+  const events = all<{ payload: string | null }>(database, "select payload_json payload from case_events where case_id = ?", task.caseId)
+  for (const number of numbers) {
+    expect(result?.result ?? "").not.toContain(number)
+    for (const event of events) expect(event.payload ?? "").not.toContain(number)
+  }
   const doc = one<{ id: string; storagePath: string | null; metadata: string }>(
     database,
     "select id, storage_path storagePath, metadata_json metadata from generated_documents where task_id = ? and kind = 'i9_section2'",
@@ -284,10 +247,10 @@ test("accepting an I-9 records Section 2 with a typed e-signature and a hash-ver
     task.id,
   )
   expect(form).toBeTruthy()
-  expect(form!.data).not.toContain(listA ? "X1234567" : "D1234567")
+  for (const number of numbers) expect(form!.data).not.toContain(number)
 
   // The signed copy downloads from the case page and verifies against its hash.
-  await page.goto(`/onboarding/cases/${task.caseId}?tab=documents`)
+  await page.goto(`/onboarding/people/${task.caseId}?tab=documents`)
   await expect(page.getByTestId("tabpanel-documents")).toBeVisible()
   const generated = page.getByTestId("generated-document").filter({ hasText: /I-9/ }).first()
   await expect(generated).toBeVisible()
@@ -300,32 +263,27 @@ test("accepting an I-9 records Section 2 with a typed e-signature and a hash-ver
   await shot(page, "case-documents")
 })
 
-test("setting up payroll lists the pre-flight checks and creates the profile", async ({ page }) => {
+test("setting up payroll lists what is missing, then creates the profile", async ({ page }) => {
   test.setTimeout(90_000)
   const database = await openLiveDb(page)
   const blocked = tasksOf(database, "setup_payroll", "blocked")[0]
   expect(blocked, "a payroll setup that is still blocked").toBeTruthy()
-  await page.goto(`/onboarding/tasks/${blocked.id}`)
-  await expect(page.getByTestId("preflight")).toBeVisible()
-  await expect(page.getByTestId("payroll-blockers")).toBeVisible()
+  await openTask(page, blocked.id)
+  await expect(page.getByTestId("preflight-w4").or(page.getByTestId("preflight-i9")).or(page.getByTestId("preflight-agreement")).or(page.getByTestId("preflight-deposit")).or(page.getByTestId("preflight-direct_deposit")).first()).toBeVisible()
   await expect(page.getByTestId("create-payroll")).toBeDisabled()
   expect(statusOf(database, blocked.id)).toBe("blocked")
   await shot(page, "payroll-blocked")
 
   const [task] = tasksOf(database, "setup_payroll", "ready")
   expect(task, "a payroll setup that is ready").toBeTruthy()
-  await page.goto(`/onboarding/tasks/${task.id}`)
-  await expect(page.getByTestId("task-screen")).toHaveAttribute("data-task-type", "setup_payroll")
-  const preflight = page.getByTestId("preflight")
-  for (const id of ["agreement", "deposit", "w4", "direct_deposit", "i9"]) await expect(preflight.getByTestId(`preflight-${id}`)).toBeVisible()
-  await expect(page.getByTestId("payroll-blockers")).toHaveCount(0)
+  await openTask(page, task.id)
+  await expect(page.getByTestId("drawer-body")).toHaveAttribute("data-task-type", "setup_payroll")
+  await expect(page.getByTestId("preflight")).toContainText("requirements are in place")
   await expect(page.getByTestId("payroll-profile")).toContainText(/biweekly/i)
-  await expect(page.getByTestId("payroll-estimate")).toBeVisible()
   await shot(page, "payroll-ready")
 
   await page.getByTestId("create-payroll").click()
-  await expect(page.getByTestId("task-notice")).toBeVisible({ timeout: 30_000 })
-  expect(statusOf(database, task.id)).toBe("done")
+  await expect.poll(() => statusOf(database, task.id), { timeout: 30_000 }).toBe("done")
   const result = one<{ result: string | null }>(database, "select result_json result from tasks where id = ?", task.id)
   expect(result?.result ?? "").toContain("biweekly")
 })
@@ -334,7 +292,7 @@ test("filings are confirmed with a reference number", async ({ page }) => {
   const database = await openLiveDb(page)
   const [task] = tasksOf(database, "file_new_hire_report", "ready")
   expect(task, "a new-hire report waiting to be filed").toBeTruthy()
-  await page.goto(`/onboarding/tasks/${task.id}`)
+  await openTask(page, task.id)
   await expect(page.getByTestId("filing-summary")).toBeVisible()
   await expect(page.getByTestId("filing-summary")).not.toContainText(/\d{3}-\d{2}-\d{4}/)
   await shot(page, "new-hire-report")
@@ -343,8 +301,7 @@ test("filings are confirmed with a reference number", async ({ page }) => {
   expect(statusOf(database, task.id)).toBe("ready")
   await page.getByTestId("confirmation-number").fill("NHR-2026-0042")
   await page.getByTestId("mark-submitted").click()
-  await expect(page.getByTestId("task-notice")).toBeVisible({ timeout: 30_000 })
-  expect(statusOf(database, task.id)).toBe("done")
+  await expect.poll(() => statusOf(database, task.id), { timeout: 30_000 }).toBe("done")
   expect(one<{ result: string | null }>(database, "select result_json result from tasks where id = ?", task.id)?.result ?? "").toContain("NHR-2026-0042")
 })
 
@@ -359,10 +316,10 @@ test("a case opens on its tasks and has documents, forms, order and activity tab
     ) ?? undefined
   expect(target, "a case with forms and uploads").toBeTruthy()
 
-  await page.goto("/onboarding/cases")
-  await page.getByTestId("cases-search").fill(target!.person)
+  await page.goto("/onboarding/people")
+  await page.getByTestId("people-search").fill(target!.person)
   await expect(page).toHaveURL(/q=/)
-  await page.getByTestId("case-row").first().getByRole("link").first().click()
+  await page.getByTestId("person-row").first().getByRole("link").first().click()
   await expect(page.getByTestId("case-detail")).toBeVisible()
   await expect(page.getByTestId("case-person")).toContainText(target!.person)
   await expect(page.getByTestId("tabpanel-tasks")).toBeVisible()
@@ -390,34 +347,24 @@ test("a case opens on its tasks and has documents, forms, order and activity tab
   await expect(page.getByTestId("tabpanel-activity")).toBeVisible()
   await shot(page, "case-activity")
 
-  await page.goto(`/onboarding/cases/${target!.caseId}?tab=forms`)
+  await page.goto(`/onboarding/people/${target!.caseId}?tab=forms`)
   await expect(page.getByTestId("tabpanel-forms")).toBeVisible()
   await expect(page.getByRole("button", { name: /cancel|terminate|reactivate/i })).toHaveCount(0)
 })
 
-test("the directory searches, filters and sorts people by risk then start date", async ({ page }) => {
-  await page.goto("/onboarding/cases")
-  await expect(page.getByTestId("cases-directory")).toBeVisible()
-  const rows = page.getByTestId("case-row")
+test("the people list is the client's list plus a Client column, and searches and filters", async ({ page }) => {
+  await page.goto("/onboarding/people")
+  await expect(page.getByTestId("people-filters")).toBeVisible()
+  const rows = page.getByTestId("person-row")
   await expect(rows.first()).toBeVisible()
   const total = await rows.count()
   expect(total).toBeGreaterThan(0)
-  await expect(page.getByTestId("case-progress").first()).toContainText(/step|complete|Not onboarding/)
-  await shot(page, "cases")
-
-  // At-risk people come first.
-  const flags = await rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-at-risk") === "true"))
-  const firstSafe = flags.indexOf(false)
-  if (firstSafe !== -1) expect(flags.slice(firstSafe).some(Boolean)).toBe(false)
-
-  await page.getByTestId("at-risk-filter").click()
-  await expect(page).toHaveURL(/atRisk=1/)
-  await expect(rows.first()).toBeVisible()
-  const riskFlags = await rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-at-risk")))
-  expect(riskFlags.every((flag) => flag === "true")).toBe(true)
-  await shot(page, "cases-at-risk")
-  await page.getByTestId("clear-filters").click()
-  await expect(page).not.toHaveURL(/atRisk/)
+  await expect(page.getByRole("columnheader").allTextContents()).resolves.toEqual(
+    expect.arrayContaining(["Name", "Client", "Role", "Status"]),
+  )
+  await expect(page.getByRole("columnheader", { name: /location/i })).toHaveCount(0)
+  await expect(page.getByTestId("location-filter")).toHaveCount(0)
+  await shot(page, "people")
 
   await page.getByTestId("status-filter").click()
   await page.getByRole("option", { name: "Active", exact: true }).click()
@@ -429,13 +376,15 @@ test("the directory searches, filters and sorts people by risk then start date",
   await page.getByTestId("client-filter").click()
   const options = page.getByRole("option")
   await expect(options.nth(1)).toBeVisible()
+  const name = (await options.nth(1).innerText()).trim()
   await options.nth(1).click()
   await expect(page).toHaveURL(/client=/)
   await expect(rows.first()).toBeVisible()
-  await shot(page, "cases-client")
+  for (const row of await rows.all()) await expect(row).toContainText(name)
+  await shot(page, "people-client")
   await page.getByTestId("clear-filters").click()
 
-  await page.getByTestId("cases-search").fill("zzzz-nobody")
-  await expect(page.getByTestId("no-cases")).toBeVisible()
-  await shot(page, "cases-empty")
+  await page.getByTestId("people-search").fill("zzzz-nobody")
+  await expect(page.getByTestId("no-people")).toBeVisible()
+  await shot(page, "people-empty")
 })

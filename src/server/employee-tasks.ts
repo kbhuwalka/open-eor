@@ -17,6 +17,7 @@ import { caseDocuments, documentSignatures, formSubmissions, generatedDocuments 
 import { HEALTH_TIERS, type HealthTier } from "@/domain/cost-rates"
 import {
   hasErrors,
+  parseIdentityDocumentDetails,
   personalDetailsPayload,
   validateDirectDeposit,
   validateI9Section1,
@@ -25,6 +26,7 @@ import {
   type DirectDepositData,
   type FieldErrors,
   type I9Section1Data,
+  type IdentityDocumentDraft,
   type PersonalDetailsData,
   type SignatureField,
   type W4Data,
@@ -485,14 +487,26 @@ export type DocumentPath = keyof typeof DOCUMENT_PATHS
 
 export type UploadedIdentityDocument = EmployeeUploadView
 
+export type IdentityUploadInput = {
+  taskId: string
+  kind: string
+  fileName: string
+  declaredType: string
+  bytes: Uint8Array
+  /** What the employee read off the document; Section 2 is filled from it. */
+  details: IdentityDocumentDraft
+}
+
 /**
  * Stores one identity document (type, size and content checked; the bytes land under the uploads
- * root) and records it on the case. A newer file of the same kind replaces the older one.
+ * root) and records it on the case with the details the employee entered (validated against the
+ * I-9 document list; field errors keyed `title`, `issuingAuthority`, `number`, `expiresOn`). A
+ * newer file of the same kind replaces the older one.
  */
 export async function uploadIdentityDocument(
   deps: CaseServiceDeps,
   user: EmployeeActor,
-  input: { taskId: string; kind: string; fileName: string; declaredType: string; bytes: Uint8Array },
+  input: IdentityUploadInput,
 ): Promise<UploadedIdentityDocument> {
   return storeIdentityDocument(deps, user, input)
 }
@@ -501,11 +515,13 @@ export async function uploadIdentityDocument(
 export function storeIdentityDocument(
   deps: CaseServiceDeps,
   user: EmployeeActor,
-  input: { taskId: string; kind: string; fileName: string; declaredType: string; bytes: Uint8Array },
+  input: IdentityUploadInput,
 ): UploadedIdentityDocument {
   const { employee } = requireOwnTask(deps, user, input.taskId, { types: ["upload_documents"], ready: true })
   if (!(LIST_KINDS as readonly string[]).includes(input.kind)) throw new EmployeeInputError("Choose which document this is.")
   const kind = input.kind as ListKind
+  const parsed = parseIdentityDocumentDetails(kind, input.details ?? {}, { today: todayIso(deps.now()) })
+  if (!parsed.ok) throw new EmployeeInputError("Check the document details.", parsed.errors)
   validateUpload({ fileName: input.fileName, declaredType: input.declaredType, bytes: input.bytes })
 
   const storagePath = writeUploadFile({
@@ -515,7 +531,14 @@ export function storeIdentityDocument(
     bytes: input.bytes,
   })
   try {
-    uploadCaseDocument(deps, { actor: user as SessionUser, caseId: employee.caseId, kind, fileName: input.fileName, storagePath })
+    uploadCaseDocument(deps, {
+      actor: user as SessionUser,
+      caseId: employee.caseId,
+      kind,
+      fileName: input.fileName,
+      storagePath,
+      details: parsed.details,
+    })
   } catch (error) {
     removeStoredFile(storagePath)
     throw error
@@ -547,6 +570,10 @@ export function submitDocuments(
   }
   const sentBack = chosen.find((doc) => doc?.status === "rejected")
   if (sentBack) throw new EmployeeInputError(`Replace ${sentBack.fileName}: Northwind sent it back.`)
+  const undescribed = chosen.find((doc) => doc?.details === null)
+  if (undescribed) {
+    throw new EmployeeInputError(`Upload ${undescribed.fileName} again with its document number and expiration date.`)
+  }
 
   const rows = deps.db.select().from(caseDocuments).where(eq(caseDocuments.caseId, employee.caseId)).all()
   const active = selectActiveIdentityDocuments(rows.map((row) => ({ ...row, createdAt: row.createdAt.getTime() })))

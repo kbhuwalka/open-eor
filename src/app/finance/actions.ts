@@ -20,6 +20,15 @@ import {
 } from "@/server/billing"
 import { fail, toActionError, type ActionResult } from "@/server/action-result"
 import type { CaseServiceDeps } from "@/server/deps"
+import {
+  depositOrderOfPayment,
+  financeInvoiceDetail,
+  financeInvoiceRecord,
+  financePaymentRecord,
+  type FinancePaymentRecord,
+} from "@/server/finance-lists"
+import type { StaffInvoiceRow } from "@/lib/finance-staff-view"
+import type { InvoiceDetail } from "@/lib/finance-view"
 
 const MAX_BULK = 100
 const MAX_REASON = 300
@@ -100,16 +109,28 @@ export async function settlePaymentsAction(paymentIds: unknown): Promise<ActionR
   }
 }
 
+/**
+ * "Mark failed" for any payment. An open order's in-flight deposit payment fails as the order's
+ * deposit not received (its reason reads "Deposit not received: …" and the client's Pay deposit
+ * step reopens), pinned to this payment so a newer one is never failed instead; any other payment
+ * fails as itself.
+ */
 export async function failPaymentAction(paymentId: unknown, reason: unknown): Promise<ActionResult<{ paymentId: string }>> {
   return asFinance((user) => {
     const pid = id(paymentId)
     if (!pid) return fail("validation", "Choose a payment to mark as failed.", { field: "paymentId" })
     const why = reasonOf(reason)
     if (!why) return fail("validation", `Say why the payment failed (up to ${MAX_REASON} characters).`, { field: "reason" })
+    const caseId = depositOrderOfPayment(getDb(), user, pid)
+    if (caseId) {
+      const result = markDepositNotReceived(deps(), { actor: user, caseId, reason: why, paymentId: pid })
+      return ok({ paymentId: result.paymentId })
+    }
     return ok(failPayment(deps(), { actor: user, paymentId: pid, reason: why }))
   })
 }
 
+/** "Mark as paid" on an unpaid deposit: the client paid outside the product. */
 export async function markDepositReceivedAction(caseId: unknown): Promise<ActionResult<{ caseId: string }>> {
   return asFinance((user) => {
     const cid = id(caseId)
@@ -118,18 +139,27 @@ export async function markDepositReceivedAction(caseId: unknown): Promise<Action
   })
 }
 
-/** Fails the client's in-flight deposit payment. The reason is optional; empty text means none. */
-export async function markDepositNotReceivedAction(
-  caseId: unknown,
-  reason?: unknown,
-): Promise<ActionResult<{ caseId: string; paymentId: string }>> {
-  return asFinance((user) => {
-    const cid = id(caseId)
-    if (!cid) return fail("validation", "Choose an order.", { field: "caseId" })
-    const text = typeof reason === "string" ? reason.trim() : ""
-    if (text.length > MAX_REASON) return fail("validation", `Keep the reason under ${MAX_REASON} characters.`, { field: "reason" })
-    return ok(markDepositNotReceived(deps(), { actor: user, caseId: cid, ...(text ? { reason: text } : {}) }))
-  })
+// ── Records the drawer loads on demand ──────────────────────────────
+
+/** A payment the page did not list (a deep link, an invoice's payment), with the invoices it covers. */
+export async function loadFinancePaymentAction(paymentId: unknown): Promise<FinancePaymentRecord | null> {
+  const user = await requireRole("finance")
+  const pid = id(paymentId)
+  return pid ? financePaymentRecord(getDb(), user, pid) : null
+}
+
+/** An invoice the page did not list, as a list row. */
+export async function loadFinanceInvoiceAction(invoiceId: unknown): Promise<StaffInvoiceRow | null> {
+  const user = await requireRole("finance")
+  const iid = id(invoiceId)
+  return iid ? financeInvoiceRecord(getDb(), user, iid) : null
+}
+
+/** The invoice drawer's lines, payments and client. */
+export async function loadFinanceInvoiceDetailAction(invoiceId: unknown): Promise<InvoiceDetail | null> {
+  const user = await requireRole("finance")
+  const iid = id(invoiceId)
+  return iid ? financeInvoiceDetail(getDb(), user, iid) : null
 }
 
 export async function voidInvoiceAction(invoiceId: unknown, reason: unknown): Promise<ActionResult<{ invoiceId: string }>> {

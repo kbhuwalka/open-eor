@@ -21,6 +21,30 @@ export function formatIsoDay(iso: string): string {
   return `${MONTHS[m - 1]} ${d}, ${y}`
 }
 
+/** "Nov 2": a day in a dense row, where the year is clear from the context. */
+export function formatIsoShortDay(iso: string): string {
+  const { m, d } = parts(iso)
+  return `${MONTHS[m - 1]} ${d}`
+}
+
+/** "Oct 30" in the year of `today` (a `YYYY-MM-DD` business day), "Jan 4, 2027" in any other year. */
+export function formatIsoDayInYear(iso: string, today: string): string {
+  return parts(iso).y === parts(today).y ? formatIsoShortDay(iso) : formatIsoDay(iso)
+}
+
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+
+/** "2026-10": the month of a day or of a timestamp's business day, sortable as text. */
+export function isoMonthKey(iso: string): string {
+  return dayParts(iso).slice(0, 7)
+}
+
+/** "October 2026" from a day, a timestamp (its business day) or a `YYYY-MM` month key. */
+export function formatIsoMonth(iso: string): string {
+  const [y, m] = (iso.length === 7 ? iso : dayParts(iso)).split("-").map(Number)
+  return `${MONTH_NAMES[m - 1]} ${y}`
+}
+
 /** "Feb 23 – Mar 8, 2026": the year only once when both ends share it. */
 export function formatIsoRange(start: string, end: string): string {
   const a = parts(start)

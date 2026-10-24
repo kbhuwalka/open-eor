@@ -45,6 +45,10 @@ async function loadDetail(invoiceId: string): Promise<InvoiceDetail | null> {
 
 const pdfHref = (invoiceId: string) => `/client/finance/invoices/${encodeURIComponent(invoiceId)}/pdf`
 
+async function payNothing(): Promise<PayOutcome> {
+  return { ok: false, message: "Paying is not available on this review page." }
+}
+
 function Section({ title, description, children, testId }: { title: string; description: string; children: React.ReactNode; testId: string }) {
   return (
     <section className="flex flex-col gap-4" data-testid={testId}>
@@ -171,9 +175,16 @@ export function FinanceShowcase() {
         description="The tab on a person profile: a started hire with history, a new hire with only a deposit, and no invoices."
       >
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-8">
-          <PersonPaymentsTab invoices={ava} />
-          <PersonPaymentsTab invoices={jordan} />
-          <PersonPaymentsTab invoices={[]} />
+          {[ava, jordan, []].map((invoices, index) => (
+            <PersonPaymentsTab
+              key={index}
+              invoices={invoices}
+              loadDetail={loadDetail}
+              pdfHref={pdfHref}
+              method={fixtures.method}
+              payInvoices={payNothing}
+            />
+          ))}
         </div>
       </Section>
     </div>

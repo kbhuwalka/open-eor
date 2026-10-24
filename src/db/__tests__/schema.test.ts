@@ -11,6 +11,7 @@ import { DEFAULT_WORKFLOW, TASK_PARTIES as DOMAIN_PARTIES, TASK_STATUSES as DOMA
 import { createDb, resolveDbPath } from "../client"
 import * as schema from "../schema"
 import {
+  caseDocuments,
   clientAgreements,
   clientCompanies,
   onboardingCases,
@@ -222,6 +223,27 @@ describe("task tables", () => {
     expect(cases.length).toBeGreaterThan(0)
     expect(cases.every((c) => c.id !== "old" && c.lifecycle)).toBe(true)
     expect(db.select().from(tasks).all().length).toBeGreaterThan(0)
+  })
+
+  it("adds the identity-document detail columns to a database from before them, leaving old uploads blank", () => {
+    const { db, dbPath } = open()
+    const count = db.select().from(caseDocuments).all().length
+    expect(count).toBeGreaterThan(0)
+    db.$client.close()
+
+    const old = new Database(dbPath)
+    for (const column of ["document_title", "issuing_authority", "document_number_encrypted", "expires_on"]) {
+      old.exec(`ALTER TABLE case_documents DROP COLUMN ${column}`)
+    }
+    old.close()
+
+    const reopened = createDb(dbPath, { forceSeed: false })
+    const rows = reopened.select().from(caseDocuments).all()
+    expect(rows).toHaveLength(count)
+    expect(
+      rows.every((r) => r.documentTitle === null && r.issuingAuthority === null && r.documentNumberEncrypted === null && r.expiresOn === null)
+    ).toBe(true)
+    reopened.$client.close()
   })
 })
 

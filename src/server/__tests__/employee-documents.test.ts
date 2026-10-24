@@ -22,7 +22,7 @@ import { listEmployeeDocuments, readEmployeeDocument, readIdentityUpload } from 
 import { tasksForCase } from "../tasks"
 import { writeSignedFile } from "../uploads"
 
-import { sessionUser, setup, tempDbFactory } from "./helpers"
+import { SAMPLE_IDENTITY_DETAILS, sessionUser, setup, tempDbFactory } from "./helpers"
 
 const openDb = tempDbFactory()
 
@@ -185,6 +185,7 @@ describe("employee signed documents", () => {
       fileName: "passport.png",
       declaredType: "image/png",
       bytes: PNG,
+      details: SAMPLE_IDENTITY_DETAILS.list_a,
     })
     expect(readIdentityUpload(db, ctx.worker, stored.id)).toMatchObject({ ok: true, mime: "image/png", fileName: "passport.png" })
     expect(readIdentityUpload(db, sessionUser(db, SEED_IDS.users.specialist), stored.id)).toMatchObject({ ok: true })

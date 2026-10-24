@@ -33,7 +33,8 @@ export type InvoiceTableProps = {
   rows: readonly InvoiceRow[]
   selected: ReadonlySet<string>
   onSelectedChange: (next: Set<string>) => void
-  onOpen: (row: InvoiceRow) => void
+  /** Opens an invoice, with every listed id in the table's current order (all pages) for the drawer's Previous and Next. */
+  onOpen: (row: InvoiceRow, orderedIds: string[]) => void
   /** False disables the row checkboxes (no payment method or online payment unavailable). */
   canPay: boolean
   /** Shown in the body when `rows` is empty (the caller knows whether filters are active). */
@@ -145,7 +146,7 @@ export function InvoiceTable({ rows, selected, onSelectedChange, onOpen, canPay,
                   <div className="flex flex-col items-start">
                     <button
                       type="button"
-                      onClick={() => onOpen(row)}
+                      onClick={() => onOpen(row, sorted.map((item) => item.id))}
                       className="font-medium outline-none after:absolute after:inset-0 focus-visible:after:ring-3 focus-visible:after:ring-ring/50"
                       data-testid="invoice-open"
                     >

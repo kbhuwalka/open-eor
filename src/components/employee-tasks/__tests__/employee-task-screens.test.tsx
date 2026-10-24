@@ -289,18 +289,66 @@ describe("UploadDocumentsScreen", () => {
     mime: "application/pdf" as const,
     href: "/api/documents/doc_a",
     status: "uploaded" as const,
+    details: { title: "U.S. Passport", issuingAuthority: "U.S. Department of State", maskedNumber: "•••• 0174", expiresOn: "2031-05-15" },
   }
   const file = (name: string, type: string, body = "x") => new File([body], name, { type })
 
-  it("keeps Send disabled until the chosen option has all its documents", async () => {
+  async function choose(kind: string, title: string) {
+    await userEvent.click(screen.getByTestId(`doc-title-${kind}`))
+    await userEvent.click(await screen.findByRole("option", { name: title }))
+  }
+
+  async function describePassport() {
+    await choose("list_a", "U.S. Passport")
+    const slot = within(screen.getByTestId("slot-list_a"))
+    await userEvent.type(slot.getByLabelText("Document number *"), "583920174")
+    await userEvent.type(slot.getByLabelText("Expiration date *"), "05152031")
+  }
+
+  it("asks which document it is, its number and expiry, and sends them with the file", async () => {
     actions.uploadDocumentAction.mockResolvedValue(ok(passport))
     render(<UploadDocumentsScreen data={empty} />)
     expect(screen.getByTestId("submit-documents")).toBeDisabled()
 
+    await describePassport()
+    expect(screen.queryByLabelText("Issued by *")).toBeNull()
     await userEvent.upload(screen.getByTestId("file-list_a"), file("passport.pdf", "application/pdf"))
     await waitFor(() => expect(screen.getByTestId("upload-name")).toHaveTextContent("passport.pdf"))
     expect(actions.uploadDocumentAction).toHaveBeenCalledTimes(1)
+    const form = actions.uploadDocumentAction.mock.calls[0][1] as FormData
+    expect(Object.fromEntries([...form.entries()].filter(([key]) => key !== "file"))).toEqual({
+      kind: "list_a",
+      title: "U.S. Passport",
+      issuingAuthority: "U.S. Department of State",
+      number: "583920174",
+      expiresOn: "2031-05-15",
+    })
+    expect(screen.getByTestId("upload-details")).toHaveTextContent("U.S. Passport · •••• 0174 · expires May 15, 2031")
     expect(screen.getByTestId("submit-documents")).toBeEnabled()
+  })
+
+  it("holds a file chosen before the details, and uploads it once they are complete", async () => {
+    actions.uploadDocumentAction.mockResolvedValue(ok(passport))
+    render(<UploadDocumentsScreen data={empty} />)
+    await userEvent.upload(screen.getByTestId("file-list_a"), file("passport.pdf", "application/pdf"))
+    expect(await screen.findByText("Choose the document.")).toBeInTheDocument()
+    expect(screen.getByText("Enter the document number.")).toBeInTheDocument()
+    expect(actions.uploadDocumentAction).not.toHaveBeenCalled()
+
+    await describePassport()
+    await userEvent.click(screen.getByTestId("send-file-list_a"))
+    await waitFor(() => expect(actions.uploadDocumentAction).toHaveBeenCalledTimes(1))
+  })
+
+  it("asks who issued a document whose title does not say, and drops the expiry for one that never expires", async () => {
+    render(<UploadDocumentsScreen data={empty} />)
+    await userEvent.click(screen.getByTestId("path-list_b_c"))
+    await choose("list_b", "Driver's license")
+    expect(within(screen.getByTestId("slot-list_b")).getByLabelText("Issued by *")).toBeInTheDocument()
+    await choose("list_c", "Social Security Account Number card (unrestricted)")
+    const card = within(screen.getByTestId("slot-list_c"))
+    expect(card.queryByLabelText(/Expiration date/)).toBeNull()
+    expect(card.queryByLabelText("Issued by *")).toBeNull()
   })
 
   it("needs both a List B and a List C document on the second path", async () => {
@@ -314,17 +362,22 @@ describe("UploadDocumentsScreen", () => {
 
   it("rejects a file of the wrong type in the browser without sending it", async () => {
     render(<UploadDocumentsScreen data={empty} />)
+    await describePassport()
     await userEvent.upload(screen.getByTestId("file-list_a"), file("notes.txt", "text/plain"), { applyAccept: false })
     expect(await screen.findByTestId("upload-error-list_a")).toHaveTextContent("Upload a PNG, JPEG or PDF file.")
     expect(actions.uploadDocumentAction).not.toHaveBeenCalled()
     expect(screen.getByTestId("submit-documents")).toBeDisabled()
   })
 
-  it("shows the server's reason when it refuses a file", async () => {
-    actions.uploadDocumentAction.mockResolvedValue(fail("That file is not a PNG, JPEG or PDF."))
+  it("shows the server's reason when it refuses a file or a detail", async () => {
+    actions.uploadDocumentAction.mockResolvedValue(
+      fail("Check the document details.", { errors: { expiresOn: "This document has expired. Upload a current one." } }),
+    )
     render(<UploadDocumentsScreen data={empty} />)
+    await describePassport()
     await userEvent.upload(screen.getByTestId("file-list_a"), file("fake.pdf", "application/pdf"))
-    expect(await screen.findByTestId("upload-error-list_a")).toHaveTextContent("That file is not a PNG, JPEG or PDF.")
+    expect(await screen.findByTestId("upload-error-list_a")).toHaveTextContent("Check the document details.")
+    expect(screen.getByText("This document has expired. Upload a current one.")).toBeInTheDocument()
   })
 
   it("sends the chosen path and goes to the next task", async () => {
@@ -333,6 +386,13 @@ describe("UploadDocumentsScreen", () => {
     await userEvent.click(screen.getByTestId("submit-documents"))
     await waitFor(() => expect(router.push).toHaveBeenCalledWith(OUTCOME.nextHref))
     expect(actions.submitDocumentsAction).toHaveBeenCalledWith("task_1", "list_a")
+  })
+
+  it("asks for an earlier upload without details to be uploaded again with them", () => {
+    render(<UploadDocumentsScreen data={{ ...empty, uploads: [{ ...passport, details: null }] }} />)
+    expect(screen.getByTestId("upload-needs-details")).toHaveTextContent("Add this document's details and upload it again.")
+    expect(screen.getByTestId("details-list_a")).toBeInTheDocument()
+    expect(screen.getByTestId("submit-documents")).toBeDisabled()
   })
 
   it("on rework explains the rejection and holds Send until the document is replaced", async () => {
@@ -347,8 +407,13 @@ describe("UploadDocumentsScreen", () => {
     expect(screen.getByTestId("sent-back")).toBeInTheDocument()
     expect(screen.getByTestId("upload-reason")).toHaveTextContent("The corner is cut off")
     expect(screen.getByTestId("submit-documents")).toBeDisabled()
-    expect(screen.getByTestId("choose-list_a")).toHaveTextContent("Replace")
 
+    await userEvent.click(screen.getByTestId("replace-list_a"))
+    const slot = within(screen.getByTestId("slot-list_a"))
+    expect(slot.getByTestId("doc-title-list_a")).toHaveTextContent("U.S. Passport")
+    expect(slot.getByLabelText("Expiration date *")).toHaveValue("05/15/2031")
+    expect(slot.getByLabelText("Document number *")).toHaveValue("")
+    await userEvent.type(slot.getByLabelText("Document number *"), "601122334")
     await userEvent.upload(screen.getByTestId("file-list_a"), file("passport-2.pdf", "application/pdf"))
     await waitFor(() => expect(screen.getByTestId("upload-name")).toHaveTextContent("passport-2.pdf"))
     expect(screen.getByTestId("upload-status")).toHaveAttribute("data-status", "uploaded")

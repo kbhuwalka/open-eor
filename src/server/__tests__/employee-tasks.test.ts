@@ -7,11 +7,12 @@ import { and, eq } from "drizzle-orm"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import { SAMPLE_SECTION1 } from "@/app/dev/forms/samples"
-import { SEED_IDS, benefitElections, formSubmissions, generatedDocuments, documentSignatures, caseDocuments, type AppDatabase } from "@/db"
-import type { DirectDepositData, PersonalDetailsData, W4Data } from "@/domain/forms"
+import { SEED_IDS, benefitElections, caseEvents, formSubmissions, generatedDocuments, documentSignatures, caseDocuments, type AppDatabase } from "@/db"
+import type { DirectDepositData, IdentityDocumentDraft, IdentityListKind, PersonalDetailsData, W4Data } from "@/domain/forms"
 
 import { rejectTaskAsActor, tasksForCase } from "../tasks"
 import { decryptFields } from "../field-crypto"
+import { identityDetailsOf } from "../identity-documents"
 import { readSignedFile } from "../uploads"
 import { verifySignedDocument } from "../documents"
 import {
@@ -30,7 +31,7 @@ import {
 } from "../employee-tasks"
 import { loadEmployeeCase, loadEmployeeScreen } from "../employee-portal"
 
-import { sessionUser, setup, tempDbFactory } from "./helpers"
+import { SAMPLE_IDENTITY_DETAILS, sessionUser, setup, tempDbFactory } from "./helpers"
 
 const openDb = tempDbFactory()
 
@@ -204,6 +205,7 @@ describe("employee task services: the full journey", () => {
       fileName: "passport.png",
       declaredType: "image/png",
       bytes: PNG,
+      details: SAMPLE_IDENTITY_DETAILS.list_a,
     })
     expect(uploaded).toMatchObject({ kind: "list_a", status: "uploaded", mime: "image/png" })
     submitDocuments(ctx.deps, ctx.worker, { taskId: uploadId, path: "list_a" })
@@ -280,8 +282,74 @@ describe("employee task services: identity documents", () => {
     return { ...ctx, uploadId: ctx.taskId("upload_documents") }
   }
 
-  const upload = (ctx: Awaited<ReturnType<typeof toUploads>>, kind: string, fileName = "id.png", bytes = PNG, declaredType = "image/png") =>
-    uploadIdentityDocument(ctx.deps, ctx.worker, { taskId: ctx.uploadId, kind, fileName, declaredType, bytes })
+  const upload = (
+    ctx: Awaited<ReturnType<typeof toUploads>>,
+    kind: string,
+    fileName = "id.png",
+    bytes = PNG,
+    declaredType = "image/png",
+    details: IdentityDocumentDraft = SAMPLE_IDENTITY_DETAILS[kind as IdentityListKind] ?? {},
+  ) => uploadIdentityDocument(ctx.deps, ctx.worker, { taskId: ctx.uploadId, kind, fileName, declaredType, bytes, details })
+
+  it("stores what the employee entered with the number encrypted, and shows them only its last four", async () => {
+    const db = openDb()
+    const ctx = await toUploads(db)
+    const passport = SAMPLE_IDENTITY_DETAILS.list_a
+    const stored = await upload(ctx, "list_a", "passport.png")
+
+    expect(stored.details).toEqual({
+      title: passport.title,
+      issuingAuthority: passport.issuingAuthority,
+      maskedNumber: "•••• 0174",
+      expiresOn: passport.expiresOn,
+    })
+    expect(JSON.stringify(stored)).not.toContain(passport.number)
+    const row = db.select().from(caseDocuments).where(eq(caseDocuments.id, stored.id)).get()!
+    expect(row).toMatchObject({ documentTitle: passport.title, issuingAuthority: passport.issuingAuthority, expiresOn: passport.expiresOn })
+    expect(row.documentNumberEncrypted).not.toContain(passport.number)
+    expect(identityDetailsOf(row)?.number).toBe(passport.number)
+    const events = db.select().from(caseEvents).where(eq(caseEvents.caseId, ctx.caseId)).all()
+    expect(events.some((event) => event.type === "document_uploaded")).toBe(true)
+    expect(events.every((event) => !(event.payloadJson ?? "").includes(passport.number))).toBe(true)
+
+    submitDocuments(ctx.deps, ctx.worker, { taskId: ctx.uploadId, path: "list_a" })
+    const done = tasksForCase(db, ctx.caseId).find((task) => task.id === ctx.uploadId)!
+    expect(JSON.stringify(done.result)).not.toContain(passport.number)
+  })
+
+  it("refuses details that are missing or not acceptable before storing anything", async () => {
+    const db = openDb()
+    const ctx = await toUploads(db)
+    const files = () => fs.readdirSync(uploadsDir, { recursive: true }).length
+    const before = files()
+    const attempt = upload(ctx, "list_a", "passport.png", PNG, "image/png", {
+      title: "U.S. Passport",
+      number: "",
+      expiresOn: "2026-01-01",
+    })
+    await expect(attempt).rejects.toBeInstanceOf(EmployeeInputError)
+    await attempt.catch((error: EmployeeInputError) => {
+      expect(error.errors).toEqual({ number: "Enter the document number.", expiresOn: "This document has expired. Upload a current one." })
+    })
+    await expect(upload(ctx, "list_c", "card.png", PNG, "image/png", { ...SAMPLE_IDENTITY_DETAILS.list_c, title: "U.S. Passport" }))
+      .rejects.toMatchObject({ errors: { title: "Choose a document from the list." } })
+    expect(db.select().from(caseDocuments).where(eq(caseDocuments.caseId, ctx.caseId)).all()).toHaveLength(0)
+    expect(files()).toBe(before)
+  })
+
+  it("asks for an upload made before details were asked for to be uploaded again", async () => {
+    const db = openDb()
+    const ctx = await toUploads(db)
+    ctx.driver.upload("list_a", "old-passport.png", null)
+    const screen = loadEmployeeScreen(db, ctx.worker.id, ctx.uploadId, ctx.clock.now)
+    expect(screen).toMatchObject({ uploads: [expect.objectContaining({ kind: "list_a", details: null })] })
+    expect(() => submitDocuments(ctx.deps, ctx.worker, { taskId: ctx.uploadId, path: "list_a" })).toThrow(
+      "Upload old-passport.png again with its document number and expiration date.",
+    )
+    await upload(ctx, "list_a", "passport.png")
+    submitDocuments(ctx.deps, ctx.worker, { taskId: ctx.uploadId, path: "list_a" })
+    expect(tasksForCase(db, ctx.caseId).find((task) => task.id === ctx.uploadId)?.status).toBe("done")
+  })
 
   it("checks type, size and content, and stores the file under the uploads root", async () => {
     const db = openDb()
@@ -338,6 +406,7 @@ describe("employee task services: identity documents", () => {
       fileName: "new-passport.png",
       declaredType: "image/png",
       bytes: PNG,
+      details: { ...SAMPLE_IDENTITY_DETAILS.list_a, number: "601122334" },
     })
     expect(replacement.status).toBe("uploaded")
     submitDocuments(ctx.deps, ctx.worker, { taskId: fix.id, path: "list_a" })

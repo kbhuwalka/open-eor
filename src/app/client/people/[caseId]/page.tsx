@@ -19,7 +19,7 @@ import { signedMasterAgreementFor, type SignedAgreementSummary } from "@/server/
 import { personDetailForClient, type ClientPersonDetail } from "@/server/queries"
 
 import { CancelRequestDialog, ReactivateDialog, TerminateDialog } from "./manage-dialogs"
-import { PersonPaymentsTab } from "./person-payments-tab"
+import { PersonPayments } from "./person-payments"
 import { OnboardingTab } from "./onboarding-tab"
 import { ProfileTabs, type ProfileTab } from "./profile-tabs"
 
@@ -105,13 +105,14 @@ async function PersonDetail({ params }: { params: Params }) {
   })
   const invoices = await financeQueries.listPersonInvoices(user.clientCompanyId ?? "", caseId)
   if (invoices.some((invoice) => invoice.kind === "deposit")) {
-    tabs.push({ id: "payments", label: "Payments", content: <PersonPaymentsTab invoices={invoices} /> })
+    const method = await financeQueries.getSavedPaymentMethod(user.clientCompanyId ?? "")
+    tabs.push({ id: "payments", label: "Payments", content: <PersonPayments invoices={invoices} method={method} /> })
   }
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-8">
       <Link
-        href="/client"
+        href="/client/people"
         className="inline-flex w-fit items-center gap-1.5 text-sm text-primary hover:underline"
       >
         <ArrowLeft className="size-3.5" />

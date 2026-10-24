@@ -6,6 +6,7 @@
 
 import { isWorkAuthListComboValid } from "../work-auth"
 import type { DocumentKind } from "../types"
+import { IDENTITY_DOCUMENT_TYPES } from "./identity-document"
 import {
   isBlank,
   isIsoDate,
@@ -124,31 +125,9 @@ export const I9_SECTION1_STEPS = [
 
 /** Common titles per list, as printed in the I-9 Lists of Acceptable Documents. */
 export const I9_DOCUMENT_TITLES: Record<"listA" | "listB" | "listC", readonly string[]> = {
-  listA: [
-    "U.S. Passport",
-    "U.S. Passport Card",
-    "Permanent Resident Card (Form I-551)",
-    "Employment Authorization Document (Form I-766)",
-    "Foreign passport with Form I-94 / I-551 stamp",
-    "Foreign passport with Form I-94 (nonimmigrant, authorized employer)",
-  ],
-  listB: [
-    "Driver's license",
-    "State ID card",
-    "School ID card with photograph",
-    "Voter registration card",
-    "U.S. military card or draft record",
-    "Native American tribal document",
-    "Canadian driver's license",
-  ],
-  listC: [
-    "Social Security Account Number card (unrestricted)",
-    "Certification of report of birth (Form FS-545 / DS-1350)",
-    "Birth certificate issued by a State, county or municipal authority",
-    "Native American tribal document",
-    "U.S. Citizen ID Card (Form I-197)",
-    "Employment authorization document issued by DHS",
-  ],
+  listA: IDENTITY_DOCUMENT_TYPES.list_a.map((t) => t.title),
+  listB: IDENTITY_DOCUMENT_TYPES.list_b.map((t) => t.title),
+  listC: IDENTITY_DOCUMENT_TYPES.list_c.map((t) => t.title),
 }
 
 const MIN_WORKING_AGE_YEARS = 14

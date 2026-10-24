@@ -4,24 +4,12 @@ import os from "node:os"
 import path from "node:path"
 
 import { eq } from "drizzle-orm"
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
-
-const { requirePortalUser } = vi.hoisted(() => ({ requirePortalUser: vi.fn() }))
-const holder = vi.hoisted(() => ({ finance: null as unknown }))
-
-vi.mock("@/auth", () => ({ requirePortalUser }))
-vi.mock("@/server/finance-queries", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/server/finance-queries")>()),
-  get financeQueries() {
-    return holder.finance
-  },
-}))
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { createDb, invoices, SEED_IDS, SEED_NOW, type AppDatabase } from "@/db"
 import { formatCents } from "@/lib/format"
 import { groupInvoiceLines } from "@/lib/invoice-lines"
 
-import { InvoiceView } from "@/app/client/finance/invoices/[id]/invoice-view"
 import { allText, extractPages } from "../documents/__tests__/pdf-text"
 import { generateInvoicePdf } from "../documents"
 import { createFinanceQueries } from "../finance-queries"
@@ -41,10 +29,8 @@ describe("the invoice document over the seeded world", () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "eor-invoice-doc-"))
     db = createDb(path.join(dir, "invoice-document.sqlite"), { forceSeed: false })
     finance = createFinanceQueries({ getDb: () => db, now: () => SEED_NOW })
-    holder.finance = finance
   })
   afterAll(() => fs.rmSync(dir, { recursive: true, force: true }))
-  beforeEach(() => requirePortalUser.mockReset())
 
   const loadInvoiceSource = (id: string) => loadInvoiceDocumentSource(db, id, { companyId: null })!
 
@@ -86,28 +72,6 @@ describe("the invoice document over the seeded world", () => {
     for (const id of [idsOf(ACME)[0], idsOf(BRIGHTWAVE)[0]]) {
       expect(loadInvoiceDocument(db, id, { companyId: null }, SEED_NOW)?.id).toBe(id)
     }
-  })
-
-  it("the page renders the session client's invoice and is a 404 for another company's", async () => {
-    const acmeId = idsOf(ACME)[0]
-    requirePortalUser.mockResolvedValue({ id: SEED_IDS.users.clientHr, clientCompanyId: ACME })
-    const element = await InvoiceView({ params: Promise.resolve({ id: acmeId }) })
-    expect(element.props.invoice.id).toBe(acmeId)
-
-    requirePortalUser.mockResolvedValue({ id: SEED_IDS.users.clientHr2, clientCompanyId: BRIGHTWAVE })
-    await expect(InvoiceView({ params: Promise.resolve({ id: acmeId }) })).rejects.toMatchObject({
-      digest: expect.stringContaining("NEXT_HTTP_ERROR_FALLBACK;404"),
-    })
-    await expect(InvoiceView({ params: Promise.resolve({ id: encodeURIComponent("payroll:nope:1") }) })).rejects.toMatchObject({
-      digest: expect.stringContaining("NEXT_HTTP_ERROR_FALLBACK;404"),
-    })
-  })
-
-  it("the page decodes an encoded id", async () => {
-    const id = idsOf(ACME).find((candidate) => candidate.includes(":"))!
-    requirePortalUser.mockResolvedValue({ id: SEED_IDS.users.clientHr, clientCompanyId: ACME })
-    const element = await InvoiceView({ params: Promise.resolve({ id: encodeURIComponent(id) }) })
-    expect(element.props.invoice.id).toBe(id)
   })
 
   it("every stored line of every seeded invoice is its own row on the page model and in the PDF, and the rows add up to the total", async () => {

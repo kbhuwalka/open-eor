@@ -35,6 +35,25 @@ export function addBusinessDays(from: Date, n: number): Date {
   return result
 }
 
+/**
+ * Whole business days (Mon–Fri) that have passed from day `from` to day `to` (`YYYY-MM-DD`):
+ * the weekdays after `from` up to and including `to`. 0 when `to` is not after `from`. A payment
+ * started on a Friday has waited 1 business day on Monday, and still 0 over the weekend.
+ */
+export function businessDaysBetween(from: string, to: string): number {
+  if (to <= from) return 0
+  const [fy, fm, fd] = from.split("-").map(Number)
+  const [ty, tm, td] = to.split("-").map(Number)
+  const cursor = new Date(fy, fm - 1, fd)
+  const end = new Date(ty, tm - 1, td)
+  let count = 0
+  while (cursor < end) {
+    cursor.setDate(cursor.getDate() + 1)
+    if (!isWeekend(cursor)) count += 1
+  }
+  return count
+}
+
 /** Earliest allowed start date (ISO) for a request made at `now`. */
 export function earliestStartDate(now: Date): string {
   return toIsoDate(addBusinessDays(now, MIN_START_NOTICE_BUSINESS_DAYS))

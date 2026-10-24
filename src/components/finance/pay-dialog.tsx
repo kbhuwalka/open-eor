@@ -146,7 +146,7 @@ export function PayDialog({ open, onOpenChange, invoices, method, onConfirm, onP
         ) : null}
 
         <DialogFooter>
-          <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+          <DialogClose render={<Button variant="outline" disabled={pending} />}>Cancel</DialogClose>
           <Button disabled={pending || !method || count === 0} onClick={confirm} data-testid="pay-confirm">
             {pending ? "Starting payment…" : `Pay ${formatCents(totalCents)}`}
           </Button>

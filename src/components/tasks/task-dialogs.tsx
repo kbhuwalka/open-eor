@@ -1,5 +1,6 @@
 import type { ComponentType } from "react"
 
+import { AcceptAgreementDialog } from "@/app/client/accept-agreement-dialog"
 import { PayDepositDialog } from "@/app/client/pay-deposit-dialog"
 import type { TaskInboxRow } from "@/lib/task-inbox-view"
 
@@ -26,5 +27,6 @@ export type TaskDialog = ComponentType<TaskDialogProps>
  * `onDone()`; it never decides where to navigate.
  */
 export const TASK_DIALOGS: Readonly<Record<string, TaskDialog>> = {
+  accept_agreement: AcceptAgreementDialog,
   pay_deposit: PayDepositDialog,
 }

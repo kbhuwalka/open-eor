@@ -5,9 +5,11 @@ import path from "node:path"
 import { eq } from "drizzle-orm"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 
+import { parseIdentityDocumentDetails, type IdentityListKind } from "@/domain/forms"
 import { parsePolicySnapshot } from "@/domain/types"
 import { personStatusFor } from "@/domain/person-status"
 import { projectTasks, type Task } from "@/domain/tasks"
+import { identityDetailsOf } from "@/server/identity-documents"
 import { rowToTask } from "@/server/task-store"
 import { personDetailForClient } from "@/server/queries"
 import { tasksForCase } from "@/server/tasks"
@@ -62,8 +64,8 @@ describe("seed world", () => {
     expect(roleCounts).toEqual({
       client_hr: SEED_COMPANIES.length,
       worker: SEED_ROSTER.length + 1,
-      onboarding_specialist: 2,
-      finance: 2,
+      onboarding_specialist: 1,
+      finance: 1,
     })
     expect(listPersonas(db).map((u) => u.id)).toEqual([
       SEED_IDS.users.clientHr,
@@ -72,19 +74,27 @@ describe("seed world", () => {
       SEED_IDS.users.worker,
       SEED_IDS.users.worker2,
       SEED_IDS.users.specialist,
-      SEED_IDS.users.specialist2,
       SEED_IDS.users.finance,
-      SEED_IDS.users.finance2,
     ])
     const byId = Object.fromEntries(allUsers.map((user) => [user.id, user]))
     expect(byId[SEED_IDS.users.clientHr]?.displayName).toBe("Alex Harper")
     expect(byId[SEED_IDS.users.worker]?.displayName).toBe("Jordan Lee")
     expect(byId[SEED_IDS.users.worker2]?.displayName).toBe("Taylor Kim")
     expect(byId[SEED_IDS.users.specialist]?.displayName).toBe("Sam Ortiz")
-    expect(byId[SEED_IDS.users.specialist2]?.displayName).toBe("Riley Chen")
+    expect(byId[SEED_IDS.users.finance]?.displayName).toBe("Morgan Reyes")
     for (const user of allUsers) {
       expect(user.clientCompanyId !== null).not.toBe(user.providerId !== null)
     }
+
+    const staffActors = new Set(
+      db
+        .select({ actor: caseEvents.actorUserId })
+        .from(caseEvents)
+        .all()
+        .map((event) => event.actor)
+        .filter((actor) => actor !== null && byId[actor]?.providerId !== null)
+    )
+    expect(staffActors).toEqual(new Set([SEED_IDS.users.specialist, SEED_IDS.users.finance]))
 
     expect(casesForWorker(db, SEED_IDS.users.worker2)).toEqual([])
     expect(db.select().from(onboardingCases).all()).toHaveLength(SEED_ROSTER.length)
@@ -134,6 +144,19 @@ describe("seed world", () => {
     }
     const paths = rows.map((row) => row.storagePath)
     expect(new Set(paths).size).toBe(paths.length)
+  })
+
+  it("gives every identity document the details the employee would have entered, valid by the I-9 rules", () => {
+    const db = openDb()
+    const today = SEED_NOW.toISOString().slice(0, 10)
+    for (const row of db.select().from(caseDocuments).all()) {
+      const kind = row.kind as IdentityListKind
+      const details = identityDetailsOf(row)
+      expect(details, `${row.caseId} ${row.fileName}`).not.toBeNull()
+      expect(row.documentNumberEncrypted).not.toContain(details!.number)
+      const parsed = parseIdentityDocumentDetails(kind, details!, { today })
+      expect(parsed, `${row.caseId} ${row.fileName}`).toEqual({ ok: true, details })
+    }
   })
 
   it("keeps the documents of people whose I-9 was sent back, so they can be seen and replaced", () => {

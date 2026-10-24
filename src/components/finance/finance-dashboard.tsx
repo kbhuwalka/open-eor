@@ -2,13 +2,21 @@
 
 import { useState } from "react"
 
+import { FinanceDrawer } from "@/components/finance/finance-drawer"
 import { FinanceSummaryTiles, FinanceSummarySkeleton } from "@/components/finance/finance-summary-tiles"
-import { InvoiceDrawer } from "@/components/finance/invoice-drawer"
 import { InvoicesPanel } from "@/components/finance/invoices-panel"
 import { PayDialog } from "@/components/finance/pay-dialog"
-import { PaymentsTable } from "@/components/finance/payments-table"
+import { PaymentsList } from "@/components/finance/payments-list"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  invoiceView,
+  linkedInvoiceView,
+  paymentView,
+  tabForInvoice,
+  type FinanceDrawerView,
+  type FinanceTab,
+} from "@/lib/finance-drawer"
 import type {
   FinanceSummary,
   InvoiceStatusFilter,
@@ -28,14 +36,25 @@ export type FinanceDashboardProps = {
   /** Must be referentially stable (a module-level function or a server action). */
   loadInvoiceDetail: (invoiceId: string) => Promise<InvoiceDetail | null>
   pdfHref: (invoiceId: string) => string
-  /** Link to the full invoice page, shown in the drawer. Omitted on pages without one (`/dev/finance`). */
+  /**
+   * The URL that opens an invoice in this page's drawer (`invoiceDrawerHref`), so a covered invoice
+   * in the payment drawer is a real link (cmd-click opens a new tab). Omitted on `/dev/finance`.
+   */
   invoiceHref?: (invoiceId: string) => string
+  /** `?open=` of a deep link: opens that invoice in the drawer when it is one of `invoices`. */
+  linkedInvoiceId?: string | null
+  /** Called when the drawer a deep link opened is closed, to drop `?open=` from the URL. */
+  onLinkClosed?: () => void
 }
 
 /**
- * The Finance page body: summary, the Invoices and Payments tabs, the invoice drawer and the
- * Pay dialog. Data and the two server round trips come in as props, so the real page and the
- * `/dev/finance` review page render the same component.
+ * The Finance page body: summary, the Invoices and Payments tabs, the one drawer (an invoice or a
+ * payment) and the Pay dialog. Data and the two server round trips come in as props, so the real
+ * page and the `/dev/finance` review page render the same component.
+ *
+ * A deep link (`linkedInvoiceId`) opens any of the client's invoices on load, with the tab that
+ * lists it behind the drawer; a new link while the page is open opens that one (the `seenLink`
+ * check, as the specialist Home does with `?open=`).
  */
 export function FinanceDashboard({
   summary,
@@ -46,12 +65,28 @@ export function FinanceDashboard({
   loadInvoiceDetail,
   pdfHref,
   invoiceHref,
+  linkedInvoiceId = null,
+  onLinkClosed,
 }: FinanceDashboardProps) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
-  const [openRow, setOpenRow] = useState<InvoiceRow | null>(null)
+  const [view, setView] = useState<FinanceDrawerView | null>(() => linkedInvoiceView(linkedInvoiceId, invoices))
   const [payIds, setPayIds] = useState<string[] | null>(null)
-  const [tab, setTab] = useState("invoices")
+  const [tab, setTab] = useState<FinanceTab>(() => (linkedInvoiceId ? tabForInvoice(linkedInvoiceId, invoices, payments) : "invoices"))
   const [status, setStatus] = useState<InvoiceStatusFilter>("all")
+  const [seenLink, setSeenLink] = useState(linkedInvoiceId)
+  if (linkedInvoiceId !== seenLink) {
+    setSeenLink(linkedInvoiceId)
+    const linked = linkedInvoiceView(linkedInvoiceId, invoices)
+    if (linked) {
+      setView(linked)
+      setTab(tabForInvoice(linked.invoiceId, invoices, payments))
+    }
+  }
+
+  function changeView(next: FinanceDrawerView | null) {
+    setView(next)
+    if (next === null && linkedInvoiceId) onLinkClosed?.()
+  }
 
   const canPay = method !== null
   const payDisabledReason = "Online payment needs a payment method on file. Contact your Northwind account manager."
@@ -67,7 +102,7 @@ export function FinanceDashboard({
     <div className="flex flex-col gap-6">
       <FinanceSummaryTiles summary={summary} onViewOverdue={viewOverdue} />
 
-      <Tabs value={tab} onValueChange={(value) => setTab(String(value))}>
+      <Tabs value={tab} onValueChange={(value) => setTab(value === "payments" ? "payments" : "invoices")}>
         <TabsList aria-label="Finance sections">
           <TabsTrigger value="invoices" data-testid="tab-invoices">
             Invoices
@@ -81,7 +116,7 @@ export function FinanceDashboard({
             invoices={invoices}
             selected={selected}
             onSelectedChange={setSelected}
-            onOpen={setOpenRow}
+            onOpen={(row, orderedIds) => changeView(invoiceView(row.id, orderedIds))}
             onPay={setPayIds}
             canPay={canPay}
             payDisabledReason={payDisabledReason}
@@ -90,21 +125,28 @@ export function FinanceDashboard({
           />
         </TabsContent>
         <TabsContent value="payments" data-testid="tabpanel-payments">
-          <PaymentsTable payments={payments} invoiceHref={invoiceHref} invoices={invoices} />
+          <PaymentsList
+            payments={payments}
+            invoices={invoices}
+            onOpen={(paymentId, orderedIds) => changeView(paymentView(paymentId, orderedIds))}
+            keyboard={view === null && payIds === null}
+          />
         </TabsContent>
       </Tabs>
 
-      <InvoiceDrawer
-        row={openRow}
-        loadDetail={loadInvoiceDetail}
+      <FinanceDrawer
+        view={view}
+        onViewChange={changeView}
+        invoices={invoices}
+        payments={payments}
+        loadInvoiceDetail={loadInvoiceDetail}
         pdfHref={pdfHref}
         invoiceHref={invoiceHref}
         canPay={canPay}
         onPay={(row) => {
-          setOpenRow(null)
+          changeView(null)
           setPayIds([row.id])
         }}
-        onClose={() => setOpenRow(null)}
       />
 
       <PayDialog

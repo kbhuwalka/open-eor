@@ -78,7 +78,7 @@ describe("taskInboxRow", () => {
     expect(row.title).toBe("Review the order")
     expect(row.assigneeLabel).toBe("Onboarding queue")
     expect(row.scope).toBe("queue")
-    expect(row.href).toBe("/onboarding/tasks/task_1")
+    expect(row.href).toBe("/onboarding?open=task_1")
   })
 
   it("marks open tasks past their due day overdue, but not finished ones", () => {

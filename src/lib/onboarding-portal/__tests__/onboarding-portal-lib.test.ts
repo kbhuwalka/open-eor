@@ -4,9 +4,8 @@ import { earliestStartDate } from "@/domain/business-days"
 import type { PolicySnapshotV1 } from "@/domain/types"
 import { resolveWageFloor } from "@/domain/wage"
 
-import { casesSearch, compareCases, DEFAULT_CASES_QUERY, hasCaseFilters, parseCasesQuery, withCasesChange } from "../cases-query"
 import { confirmationProblem, CONFIRMATION_MAX } from "../filing"
-import { buildRejectReason, i9Checklist, rejectionHistory, rejectionProblem } from "../i9-review"
+import { buildRejectReason, rejectionHistory, rejectionProblem } from "../i9-review"
 import { hasFailingCheck, orderChecks, type OrderCheckInput } from "../order-checks"
 import { payrollBlockers, preflightItems, type PreflightInput } from "../preflight"
 import { stageProgressText } from "../stage-text"
@@ -100,7 +99,7 @@ describe("preflightItems", () => {
     expect(items.map((item) => item.id)).toEqual(["agreement", "deposit", "w4", "direct_deposit", "i9"])
     expect(items.every((item) => item.done)).toBe(true)
     expect(payrollBlockers(items)).toEqual([])
-    expect(items.every((item) => item.href.startsWith("/onboarding/cases/case_1"))).toBe(true)
+    expect(items.every((item) => item.href.startsWith("/onboarding/people/case_1"))).toBe(true)
   })
 
   it("names who each open item is waiting on", () => {
@@ -128,7 +127,7 @@ describe("preflightItems", () => {
 
   it("links a ready I-9 to its task and treats an on-file form as done", () => {
     const items = preflightItems(preflight({}, { verify_i9_section2: "ready", w4: "blocked" }))
-    expect(items[4].href).toBe("/onboarding/tasks/task_verify_i9_section2")
+    expect(items[4].href).toBe("/onboarding?open=task_verify_i9_section2")
     expect(items[4].detail).toBe("Documents are ready to verify")
     expect(items[2].done).toBe(true)
   })
@@ -141,13 +140,6 @@ describe("preflightItems", () => {
 })
 
 describe("I-9 review helpers", () => {
-  it("adds a missing-document item for an incomplete B and C pair", () => {
-    expect(i9Checklist(["list_a"]).map((item) => item.id)).not.toContain("missing_c")
-    expect(i9Checklist(["list_b"]).map((item) => item.id)).toContain("missing_c")
-    expect(i9Checklist(["list_c"]).map((item) => item.id)).toContain("missing_b")
-    expect(i9Checklist(["list_b", "list_c"])).toHaveLength(5)
-  })
-
   it("requires a document, and words for OTHER", () => {
     expect(rejectionProblem({ code: "DOC_EXPIRED", note: "", documents: [] })).toMatch(/Choose which document/)
     expect(rejectionProblem({ code: "OTHER", note: "  ", documents: ["List A"] })).toMatch(/Describe/)
@@ -185,51 +177,7 @@ describe("confirmationProblem", () => {
   })
 })
 
-describe("cases query", () => {
-  it("parses defaults and ignores junk", () => {
-    expect(parseCasesQuery({})).toEqual(DEFAULT_CASES_QUERY)
-    expect(parseCasesQuery({ status: "zzz", stage: "a b!", client: "../x", startFrom: "2026-13-45", page: "-3", size: "7", atRisk: "yes" })).toEqual(DEFAULT_CASES_QUERY)
-  })
-
-  it("round-trips every filter through the URL, omitting defaults", () => {
-    const query = {
-      ...DEFAULT_CASES_QUERY,
-      q: "anya",
-      status: "onboarding" as const,
-      atRisk: true,
-      stage: "paperwork",
-      client: "client_1",
-      startFrom: "2026-03-01",
-      startTo: "2026-03-31",
-      page: 2,
-      size: 25 as const,
-    }
-    const search = casesSearch(query)
-    expect(parseCasesQuery(Object.fromEntries(new URLSearchParams(search)))).toEqual(query)
-    expect(casesSearch(DEFAULT_CASES_QUERY)).toBe("")
-    expect(hasCaseFilters(query)).toBe(true)
-    expect(hasCaseFilters(DEFAULT_CASES_QUERY)).toBe(false)
-    expect(hasCaseFilters({ ...DEFAULT_CASES_QUERY, page: 3 })).toBe(false)
-  })
-
-  it("goes back to page one on a filter change but keeps a page change", () => {
-    const base = { ...DEFAULT_CASES_QUERY, page: 4 }
-    expect(withCasesChange(base, { atRisk: true }).page).toBe(1)
-    expect(withCasesChange(base, { page: 5 }).page).toBe(5)
-  })
-
-  it("orders at risk, then onboarding, then the earliest start date with no date last, then the name", () => {
-    const rows = [
-      { name: "Zed", status: "active" as const, atRisk: false, startDate: "2026-01-01" },
-      { name: "Ann", status: "onboarding" as const, atRisk: false, startDate: null },
-      { name: "Bob", status: "onboarding" as const, atRisk: false, startDate: "2026-03-09" },
-      { name: "Cy", status: "onboarding" as const, atRisk: true, startDate: "2026-04-01" },
-      { name: "Dee", status: "onboarding" as const, atRisk: false, startDate: "2026-03-09" },
-      { name: "Eve", status: "inactive" as const, atRisk: false, startDate: "2025-01-01" },
-    ]
-    expect([...rows].sort(compareCases).map((row) => row.name)).toEqual(["Cy", "Bob", "Dee", "Ann", "Zed", "Eve"])
-  })
-
+describe("stage progress text", () => {
   it("writes stage progress in words", () => {
     expect(stageProgressText({ status: "onboarding", stage: { title: "Paperwork" }, stageProgress: { done: 2, total: 5 } })).toBe("Paperwork · 2 of 5 steps")
     expect(stageProgressText({ status: "onboarding", stage: null, stageProgress: { done: 5, total: 5 } })).toBe("5 of 5 steps")

@@ -76,6 +76,8 @@ export type InvoicePaymentEntry = {
   status: PaymentViewStatus
   initiatedAt: string
   settledAt: string | null
+  /** When Finance marked it failed; absent from fixtures that predate it. */
+  failedAt?: string | null
   /** What this payment allocates to this invoice (not the payment's total). */
   amountCents: number
   methodLabel: string
@@ -110,7 +112,7 @@ export type InvoicePeriodView = {
 }
 
 /**
- * Everything the invoice page, the drawer and `InvoiceDocument` print. Built by `toInvoiceDetail`
+ * Everything the invoice drawer, `InvoiceDocument` and the PDF print. Built by `toInvoiceDetail`
  * from the domain `Invoice`, so the totals are the stored totals and the groups, subtotals and
  * amount due are derived from the same lines and payments.
  */
@@ -139,6 +141,8 @@ export type PaymentRow = {
   id: string
   initiatedAt: string
   settledAt: string | null
+  /** When Finance marked it failed; absent from fixtures that predate it. */
+  failedAt?: string | null
   status: PaymentViewStatus
   amountCents: number
   methodLabel: string
@@ -345,6 +349,7 @@ export function toInvoiceDetail(input: InvoiceRowInput & { context?: InvoiceCont
       status: PAYMENT_VIEW_STATUS[payment.status],
       initiatedAt: payment.initiatedAt,
       settledAt: payment.settledAt,
+      failedAt: payment.failedAt,
       amountCents: allocation.amountCents,
       methodLabel: methodLabel(payment.method),
       failureReason: payment.failureReason,
@@ -401,6 +406,7 @@ export function toPaymentRow(payment: Payment, invoices: readonly Pick<Invoice, 
     id: payment.id,
     initiatedAt: payment.initiatedAt,
     settledAt: payment.settledAt,
+    failedAt: payment.failedAt,
     status: PAYMENT_VIEW_STATUS[payment.status],
     amountCents: payment.totalCents,
     methodLabel: methodLabel(payment.method),

@@ -1,55 +1,56 @@
 import { Suspense } from "react"
 
 import { requirePortalUser } from "@/auth"
-import { TableSkeleton } from "@/components/finance-portal/skeletons"
-import { ClientOpenInvoices, ReceivablesReport } from "@/components/finance-portal/receivables-report"
+import { NothingOwed } from "@/components/finance-portal/receivables/receivables-figures"
+import { ReceivablesDashboard } from "@/components/finance-portal/receivables/receivables-dashboard"
+import { ReceivablesSkeleton } from "@/components/finance-portal/skeletons"
 import { PageHeader } from "@/components/page-header"
 import { getDb } from "@/db"
-import { parsePaging } from "@/lib/pagination"
-import { listFinanceInvoices, receivables } from "@/server/billing-queries"
+import {
+  bucketRows,
+  clearedReceivablesHref,
+  clientRows,
+  parseReceivablesQuery,
+  receivablesChips,
+  receivablesFigures,
+  searchOf,
+  withKnownClient,
+} from "@/lib/receivables-view"
+import { clientAgeing } from "@/server/finance-insights"
+import { financeReceivablesPage } from "@/server/finance-lists"
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>
 
+/** `/finance/receivables`, filtered by `?bucket=current|1-30|31-60|60-plus` and `?client=<companyId>` (both, combined). */
 export default function FinanceReceivablesPage({ searchParams }: { searchParams: SearchParams }) {
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="Receivables" description="What clients owe, by how late it is. Choose a client to see its open invoices." />
-      <Suspense fallback={<TableSkeleton />}>
+      <PageHeader title="Receivables" />
+      <Suspense fallback={<ReceivablesSkeleton />}>
         <Receivables searchParams={searchParams} />
       </Suspense>
     </div>
   )
 }
 
+/** The book is read once (`clientAgeing`): the figures and both charts derive from it; the table is its invoices. */
 async function Receivables({ searchParams }: { searchParams: SearchParams }) {
   const [user, params] = await Promise.all([requirePortalUser("finance"), searchParams])
   const db = getDb()
   const now = new Date()
-  const report = receivables(db, user, now)
-  const requested = Array.isArray(params.company) ? params.company[0] : params.company
-  const selected = report.companies.find((company) => company.companyId === requested) ?? null
-  const own = parsePaging(params)
-  const drill = parsePaging(params, "i")
-  const open = selected
-    ? listFinanceInvoices(
-        db,
-        user,
-        { companyId: selected.companyId, status: "due", sort: "dueDate", dir: "asc", page: drill.page, pageSize: drill.size },
-        now,
-      )
-    : null
+  const ageing = clientAgeing(db, user, now)
+  if (ageing.bookAgeing.outstandingCents === 0) return <NothingOwed inFlightCents={ageing.bookAgeing.inFlight.cents} />
+
+  const query = withKnownClient(parseReceivablesQuery(params), ageing)
+  const current = searchOf(params)
   return (
-    <>
-      <ReceivablesReport report={report} selectedCompanyId={selected?.companyId ?? null} paging={own} />
-      {selected && open ? (
-        <ClientOpenInvoices
-          rows={open.rows}
-          paging={open}
-          today={report.asOf}
-          companyName={selected.companyName}
-          companyId={selected.companyId}
-        />
-      ) : null}
-    </>
+    <ReceivablesDashboard
+      figures={receivablesFigures(ageing, query)}
+      byAge={bucketRows(ageing, query, current)}
+      byClient={clientRows(ageing, query, current)}
+      chips={receivablesChips(ageing, query, current)}
+      clearHref={clearedReceivablesHref(current)}
+      table={financeReceivablesPage(db, user, query, now)}
+    />
   )
 }

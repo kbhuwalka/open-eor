@@ -21,7 +21,7 @@ The screens in §3–§6 are specified but not built in the task-engine slice; t
 - Q2. Each row shows: worker display name, client name, job title (from snapshot), task title, due date, and whether this is a re-review (the task has an earlier `rejected` instance).
 - Q3. Queue entries are not claimed or locked; any `onboarding_specialist` may decide.
 
-## 4. Review detail (`/onboarding/cases/[id]`)
+## 4. Review detail (`/onboarding/people/[id]`)
 
 MUST show, in this order:
 
@@ -30,18 +30,21 @@ MUST show, in this order:
 3. **Active documents** (one per kind, latest wins) rendered inline via `GET /api/documents/[id]` (`<img>` for PNG/JPEG, `<iframe>`/`<object>` for PDF) with kind label and filename. Superseded documents listed collapsed, labelled "superseded".
 4. List-combo verdict computed by `isWorkAuthListComboValid` (so the specialist sees `WRONG_LIST_COMBO` suggestions when applicable).
 5. Timeline (shared `CaseTimeline` component), newest first, including prior rejections with reason codes.
-6. Decision form: **Accept** with the Section 2 fields (`documentTitle`, `issuingAuthority`, `documentNumber`, `expiresOn?`) and **Reject** with a required reason-code select (five codes) and a note textarea (required when `OTHER`).
+6. What the employee entered about each active document at upload, read-only: title, list, issuer, number and expiry ([employee-portal.md](./employee-portal.md) §3.1). A Social Security card's number is the SSN and is shown only as `***-**-6789`; the server masks it before sending the review, while Section 2 is still filled with the full stored number.
+7. Decision: **Verify & sign**, which fills Section 2 on the server from those entries and opens the typed-signature step (the specialist enters no document fields), and **Send back** with a required reason-code select (five codes) and a note textarea (required when `OTHER`). The drawer layout is [onboarding-portal.md](./onboarding-portal.md) §3.2.
 
 Rules:
 
+- D0. The employee's entries are the source of truth. The specialist cannot edit them; a wrong entry is corrected only by sending the document back, and the employee re-uploads it with new details. The accept action takes the task id and the signature only and refuses unless the active uploads are an acceptable combination, every one has details, and none is expired. An upload made before details were asked for can only be sent back.
+
 - D1. Accept and Reject MUST be two Server Actions that call `completeTaskAsActor` and `rejectTaskAsActor` for the task id. The page MUST NOT contain a generic "set status" action.
 - D2. Reject validation runs client-side for UX **and** in the domain (`INVALID_REJECT_REASON`).
-- D3. After a decision the action revalidates `/onboarding`, `/onboarding/cases/[id]`, `/worker`, `/client`, `/client/people/[caseId]`.
+- D3. After a decision the action revalidates `/onboarding`, `/onboarding/people/[id]`, `/worker`, `/client`, `/client/people/[caseId]`.
 
 ## 5. Worker side of the loop (`/worker`)
 
 - K1. When `fix_documents` is ready the worker page MUST show the latest `task_rejected` reason (code label + note) above the upload control.
-- K2. Re-uploading a kind appends a new `case_documents` row and emits `document_uploaded` with `supersededDocumentId` ([domain.md](./domain.md) W4). The previous file stays on disk.
+- K2. Re-uploading a kind appends a new `case_documents` row, with the details entered for the new file, and emits `document_uploaded` with `supersededDocumentId` ([domain.md](./domain.md) W4). The previous file stays on disk.
 - K3. Completing `fix_documents` uses the same payload as `upload_documents` (`documentIds`); the handler requires the active set to satisfy `isWorkAuthListComboValid` and the server re-checks regardless of the button state.
 - K4. After the worker's tasks are resolved, or the case is not `open`, the worker page is read-only.
 
@@ -75,6 +78,7 @@ Unit/server (`src/domain/tasks/__tests__/engine.test.ts`, `src/server/__tests__/
 4. Stale decision: rejecting or completing the replaced instance → `TASK_NOT_READY`.
 5. `finance` completing or rejecting `verify_i9_section2` → `FORBIDDEN_ROLE`, no event.
 6. Active-set rendering: two `list_a` rows → only the newest is in the active list; the older is marked superseded.
+7. Verify & sign fills Section 2 from the stored entries (`src/server/onboarding-portal/__tests__/specialist-tasks.test.ts`): a legacy upload without details or an expired document is refused with nothing stored; the document number is in no task result and no event.
 
 E2E (#29, `e2e/reject-loop.spec.ts`), using the seeded Jordan Lee case (waiting on `verify_i9_section2`):
 

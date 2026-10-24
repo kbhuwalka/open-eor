@@ -1,19 +1,23 @@
 import { test, expect, type Page } from "@playwright/test"
 
 import { formatCents } from "@/lib/format"
+import { invoiceDrawerHref } from "@/lib/invoice-links"
 
 import { cents, download, openLiveDb, pdfText, signInAs } from "./support/live"
 
 /**
- * The full-page invoice at /client/finance/invoices/[id], against the seeded database (run with
- * DATABASE_FILE pointing at a COPY when the server under test is not the shared dev server).
- * Read-only: nothing here pays or changes an invoice. Signs in as Brightwave's client HR.
+ * The client invoice drawer (docs/client-finance.md §2a): opened from the Invoices list, from a deep
+ * link (`/client/finance?open=<id>`, any of the client's invoices) and from the person Payments tab,
+ * against the seeded database (run with DATABASE_FILE pointing at a COPY when the server under test
+ * is not the shared dev server). Read-only: nothing here pays or changes an invoice. Signs in as
+ * Brightwave's client HR, and as Acme's for the void invoice (Brightwave has none in the seed).
  */
 
 const BRIGHTWAVE_HR = "user_client_hr_2"
 const ACME_HR = "user_client_hr"
 
 const board = (page: Page) => page.getByTestId("tabpanel-invoices")
+const drawer = (page: Page) => page.getByTestId("invoice-drawer")
 
 async function openFinance(page: Page, baseURL: string, userId = BRIGHTWAVE_HR) {
   await signInAs(page.context(), baseURL, userId)
@@ -22,14 +26,19 @@ async function openFinance(page: Page, baseURL: string, userId = BRIGHTWAVE_HR) 
   await expect(board(page).getByTestId("invoice-row").first()).toBeVisible()
 }
 
-/** Everything on the page that is an amount, in document order, from each line row. */
-async function lineAmounts(page: Page): Promise<number[]> {
-  return (await page.getByTestId("invoice-line-amount").allTextContents()).map((text) => cents(text))
+async function openLinked(page: Page, baseURL: string, invoiceId: string, userId = BRIGHTWAVE_HR) {
+  await signInAs(page.context(), baseURL, userId)
+  await page.goto(invoiceDrawerHref(invoiceId))
+  await expect(drawer(page)).toBeVisible()
+  await expect(drawer(page).getByTestId("drawer-lines")).toBeVisible()
 }
 
-const invoiceUrl = (id: string) => `/client/finance/invoices/${encodeURIComponent(id)}`
+/** Every line amount in the drawer, in order. */
+async function lineAmounts(page: Page): Promise<number[]> {
+  return (await drawer(page).getByTestId("drawer-line-amount").allTextContents()).map((text) => cents(text))
+}
 
-/** Every stored line code of the invoice, in order: the page and the PDF must show each as its own row. */
+/** Every stored line code of the invoice, in order: the drawer and the PDF must show each as its own row. */
 function storedLines(invoiceId: string, page: Page) {
   return openLiveDb(page).then((db) => {
     const rows = db
@@ -43,46 +52,38 @@ function storedLines(invoiceId: string, page: Page) {
 
 const flat = (text: string) => text.replace(/[\u2013\u2014]/g, "-").replace(/\s+/g, " ")
 
-test("opens from the list: who it is for, the period, grouped lines and a total equal to the list row", async ({ page, baseURL }) => {
+test("opens from the list: who it is for, the period, grouped lines, a total equal to the row, and a PDF with the same facts", async ({ page, baseURL }) => {
   await openFinance(page, baseURL!)
-  const section = board(page)
-  const row = section.locator("[data-testid=invoice-row][data-status=open], [data-testid=invoice-row][data-status=overdue]").filter({ hasText: "Payroll" }).first()
+  const row = board(page).locator("[data-testid=invoice-row][data-status=open], [data-testid=invoice-row][data-status=overdue]").filter({ hasText: "Payroll" }).first()
   const number = (await row.getByTestId("invoice-open").textContent())!.trim()
   const amount = cents(await row.locator("[data-slot=money]").textContent())
   const person = (await row.getByTestId("invoice-person").locator("span").first().textContent())!.trim()
 
   await row.getByTestId("invoice-open").click()
-  const period = (await page.getByTestId("drawer-period").locator("span").first().textContent())!.trim()
-  expect(period).toMatch(/\d{4}/)
-  await page.getByTestId("drawer-full-invoice").click()
-  await page.waitForURL(/\/client\/finance\/invoices\/.+/)
-  const document = page.getByTestId("invoice-document")
-  await expect(document).toBeVisible()
+  const panel = drawer(page)
+  await expect(panel.getByTestId("drawer-number")).toHaveText(number)
+  await expect(panel.getByTestId("drawer-header")).toContainText("Payroll invoice")
+  await expect(panel.getByTestId("drawer-person")).toContainText(person)
+  await expect(panel.getByTestId("drawer-period")).toContainText(/\d{4}/)
+  await expect(panel.getByTestId("drawer-facts")).toContainText("Pay date")
+  await expect(panel.getByTestId("drawer-facts")).not.toContainText("Terms")
+  await expect(panel).not.toContainText("Please pay")
+  await expect(panel).not.toContainText(/view full invoice/i)
 
-  await expect(page.getByTestId("invoice-number")).toHaveText(number)
-  await expect(page.getByTestId("invoice-person-name")).toHaveText(person)
-  await expect(page.getByTestId("invoice-period")).toHaveText(period)
-  await expect(page.getByTestId("invoice-for")).toContainText("Work location:")
-  await expect(page.getByTestId("invoice-for")).not.toContainText("start date")
-  await expect(page.getByTestId("invoice-issuer")).toContainText("Northwind")
-  await expect(page.getByTestId("invoice-bill-to")).toContainText("Brightwave")
-  await expect(document).toContainText("Pay date")
-  await expect(document).toContainText("Tax year")
-  await expect(document).not.toContainText("Terms")
-  await expect(document).not.toContainText("Please pay")
-
-  const groups = await page.getByTestId("invoice-group").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-group")))
+  const groups = await panel.getByTestId("drawer-group").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-group")))
   expect(groups).toEqual(expect.arrayContaining(["wage", "statutory", "service_fee"]))
-  expect(await page.getByTestId("invoice-line").count()).toBeGreaterThan(4)
-  await expect(page.getByTestId("invoice-line-basis").first()).not.toBeEmpty()
-  expect(await page.getByTestId("invoice-lines").textContent()).not.toMatch(/\d{4}-\d{2}-\d{2}/)
-
+  expect(await panel.getByTestId("drawer-line").count()).toBeGreaterThan(4)
+  expect(await panel.getByTestId("drawer-lines").textContent()).not.toMatch(/\d{4}-\d{2}-\d{2}/)
   expect((await lineAmounts(page)).reduce((total, value) => total + value, 0)).toBe(amount)
-  expect(cents(await page.getByTestId("invoice-total").textContent())).toBe(amount)
-  expect(cents(await page.getByTestId("invoice-amount-due").textContent())).toBe(amount)
-  await expect(page.getByTestId("invoice-pay")).toBeVisible()
+  expect(cents(await panel.getByTestId("drawer-total").textContent())).toBe(amount)
+  expect(cents(await panel.getByTestId("drawer-due").textContent())).toBe(amount)
 
-  const pdf = await download(page.request, (await page.getByTestId("invoice-pdf").getAttribute("href"))!)
+  const actions = panel.getByTestId("drawer-actions")
+  await expect(actions.locator("> *").first()).toHaveText(`Pay ${formatCents(amount)}`)
+  await expect(actions.getByRole("link", { name: "Download PDF" })).toBeVisible()
+  await expect(page.getByRole("button", { name: /close/i })).toHaveCount(1)
+
+  const pdf = await download(page.request, (await panel.getByTestId("drawer-pdf").getAttribute("href"))!)
   expect(pdf.response.status()).toBe(200)
   expect(pdf.response.headers()["content-type"]).toBe("application/pdf")
   expect(pdf.response.headers()["content-disposition"]).toBe(`attachment; filename="${number}.pdf"`)
@@ -91,18 +92,18 @@ test("opens from the list: who it is for, the period, grouped lines and a total 
   expect(printed).toContain(person)
   expect(printed).not.toContain("Terms")
   expect(printed).not.toContain("Please pay")
-  expect(printed).not.toContain("start date")
-  for (const title of await page.locator("[data-testid=invoice-line] td:first-child > p:first-child").allTextContents()) {
+  for (const title of await panel.locator("[data-testid=drawer-line] > div > span:first-child").allTextContents()) {
     expect(printed, title).toContain(flat(title))
   }
   for (const value of await lineAmounts(page)) expect(printed).toContain(formatCents(value))
   expect(printed).toContain(`Total ${formatCents(amount)}`)
 
-  await page.getByRole("link", { name: "Back to Finance" }).click()
+  await page.keyboard.press("Escape")
+  await expect(drawer(page)).toHaveCount(0)
   await expect(page).toHaveURL(/\/client\/finance$/)
 })
 
-test("every stored line of a paid payroll invoice is its own row on the page and in the PDF; a settled invoice reads $0.00 due", async ({ page, baseURL }) => {
+test("a deep link opens a paid payroll invoice: every stored line is its own row, no amount due, its payment, no Pay", async ({ page, baseURL }) => {
   const db = await openLiveDb(page)
   const paid = db
     .prepare(
@@ -118,27 +119,34 @@ test("every stored line of a paid payroll invoice is its own row on the page and
   expect(stored.rows.length).toBeGreaterThan(4)
   expect(stored.rows.reduce((total, line) => total + line.amountCents, 0)).toBe(stored.total)
 
-  await signInAs(page.context(), baseURL!, BRIGHTWAVE_HR)
-  await page.goto(invoiceUrl(paid.id))
-  await expect(page.getByTestId("invoice-document")).toHaveAttribute("data-status", "paid")
-  const codes = await page.getByTestId("invoice-line").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-code")))
+  await openLinked(page, baseURL!, paid.id)
+  const panel = drawer(page)
+  await expect(panel.getByTestId("drawer-number")).toHaveText(paid.number)
+  await expect(panel.getByTestId("drawer-header")).toContainText("Paid")
+  await expect(panel.getByTestId("drawer-paid-date")).toBeVisible()
+  await expect(page.getByTestId("tab-payments")).toHaveAttribute("aria-selected", "true")
+  const codes = await panel.getByTestId("drawer-line").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-code")))
   expect([...codes].sort()).toEqual(stored.rows.map((line) => line.code).sort())
   expect(new Set(codes).size).toBe(codes.length)
-  const shown = new Map(codes.map((code, index) => [code, 0 + index]))
   const amounts = await lineAmounts(page)
-  for (const line of stored.rows) expect(amounts[shown.get(line.code)!], line.code).toBe(line.amountCents)
-  expect(cents(await page.getByTestId("invoice-total").textContent())).toBe(stored.total)
-  await expect(page.getByTestId("invoice-balance")).toHaveText("$0.00")
-  await expect(page.getByTestId("invoice-payment").first()).toContainText("Settled")
-  await expect(page.getByTestId("invoice-pay")).toHaveCount(0)
+  for (const line of stored.rows) expect(amounts[codes.indexOf(line.code)], line.code).toBe(line.amountCents)
+  expect(cents(await panel.getByTestId("drawer-total").textContent())).toBe(stored.total)
+  await expect(panel.getByTestId("drawer-due")).toHaveCount(0)
+  await expect(panel.getByTestId("drawer-payment").first()).toContainText("Settled")
+  await expect(panel.getByTestId("drawer-pay")).toHaveCount(0)
+  await expect(panel.getByTestId("drawer-stepper")).toHaveCount(0)
 
-  const pdf = await download(page.request, (await page.getByTestId("invoice-pdf").getAttribute("href"))!)
+  const pdf = await download(page.request, (await panel.getByTestId("drawer-pdf").getAttribute("href"))!)
   const printed = flat(await pdfText(pdf.bytes))
   for (const value of stored.rows.map((line) => line.amountCents)) expect(printed).toContain(formatCents(value))
   expect(printed).toContain(`Total ${formatCents(stored.total)}`)
+
+  await page.getByRole("button", { name: /close/i }).click()
+  await expect(drawer(page)).toHaveCount(0)
+  await expect(page).toHaveURL(/\/client\/finance$/)
 })
 
-test("a deposit invoice itemises its components, with no pay period, for the person it covers", async ({ page, baseURL }) => {
+test("a deposit invoice itemises its components under one subhead, with no repeated subtotal or pay period, for the person it covers", async ({ page, baseURL }) => {
   const db = await openLiveDb(page)
   const deposit = db
     .prepare(
@@ -150,70 +158,70 @@ test("a deposit invoice itemises its components, with no pay period, for the per
     .get() as { id: string; number: string; totalCents: number }
   db.close()
   const amount = deposit.totalCents
-  await signInAs(page.context(), baseURL!, BRIGHTWAVE_HR)
-  await page.goto(invoiceUrl(deposit.id))
-  await expect(page.getByTestId("invoice-document")).toHaveAttribute("data-kind", "deposit")
-  await expect(page.getByTestId("invoice-number")).toHaveText(deposit.number)
-  const person = (await page.getByTestId("invoice-person-name").textContent())!.trim()
+  await openLinked(page, baseURL!, deposit.id)
+  const panel = drawer(page)
+  await expect(panel.getByTestId("drawer-number")).toHaveText(deposit.number)
+  await expect(panel.getByTestId("drawer-header")).toContainText("Deposit invoice")
+  await expect(panel.getByTestId("drawer-period")).toHaveText("Deposit")
+  await expect(panel.getByTestId("drawer-facts")).not.toContainText("Pay date")
+  const person = (await panel.getByTestId("drawer-person").locator("span").first().textContent())!.trim()
   expect(person.length).toBeGreaterThan(0)
-  await expect(page.getByTestId("invoice-period")).toContainText("None (security deposit)")
-  await expect(page.getByTestId("invoice-for")).not.toContainText("start date")
-  await expect(page.getByTestId("invoice-document")).not.toContainText("Terms")
-  await expect(page.getByTestId("invoice-document")).not.toContainText("Please pay")
-  await expect(page.getByTestId("invoice-lines")).toContainText("Security deposit")
-  await expect(page.getByTestId("invoice-deposit-note")).toBeVisible()
-  expect(cents(await page.getByTestId("invoice-total").textContent())).toBe(amount)
+  await expect(panel.getByTestId("drawer-group")).toHaveCount(1)
+  await expect(panel.getByTestId("drawer-lines")).toContainText("Security deposit")
+  await expect(panel.getByTestId("drawer-subtotal")).toHaveCount(0)
+  expect(cents(await panel.getByTestId("drawer-total").textContent())).toBe(amount)
 
   const stored = await storedLines(deposit.id, page)
   expect(stored.rows.length).toBeGreaterThan(1)
-  const codes = await page.getByTestId("invoice-line").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-code")))
+  const codes = await panel.getByTestId("drawer-line").evaluateAll((nodes) => nodes.map((n) => n.getAttribute("data-code")))
   expect(codes).toEqual(stored.rows.map((line) => line.code))
   expect(await lineAmounts(page)).toEqual(stored.rows.map((line) => line.amountCents))
-  expect((await lineAmounts(page)).reduce((total, value) => total + value, 0)).toBe(amount)
 
-  const pdf = await download(page.request, (await page.getByTestId("invoice-pdf").getAttribute("href"))!)
+  const pdf = await download(page.request, (await panel.getByTestId("drawer-pdf").getAttribute("href"))!)
   const printed = flat(await pdfText(pdf.bytes))
   expect(printed).toContain(person)
   expect(printed).toContain("Security deposit")
   for (const line of stored.rows) expect(printed).toContain(formatCents(line.amountCents))
   expect(printed).toContain(`Total ${formatCents(amount)}`)
-  expect(printed).not.toContain("Terms")
-  expect(printed).not.toContain("Please pay")
 })
 
-test("a payable invoice offers Pay from the page and opens the shared pay dialog (without paying)", async ({ page, baseURL }) => {
+test("an overdue invoice says Overdue once, in the header, steps through the unpaid list and offers Pay (without paying)", async ({ page, baseURL }) => {
   await openFinance(page, baseURL!)
-  const row = board(page).locator("[data-testid=invoice-row][data-status=open], [data-testid=invoice-row][data-status=overdue]").first()
-  const amount = cents(await row.locator("[data-slot=money]").textContent())
-  await row.getByTestId("invoice-open").click()
-  await page.getByTestId("drawer-full-invoice").click()
-  await expect(page.getByTestId("invoice-document")).toBeVisible()
-  await expect(page.getByTestId("invoice-balance")).toHaveText(formatCents(amount))
-  await page.getByTestId("invoice-pay").click()
+  const overdue = board(page).locator("[data-testid=invoice-row][data-status=overdue]").first()
+  test.skip((await overdue.count()) === 0, "the seeded database has no overdue invoice for this client")
+  const amount = cents(await overdue.locator("[data-slot=money]").textContent())
+  await overdue.getByTestId("invoice-open").click()
+  const panel = drawer(page)
+  await expect(panel.getByTestId("drawer-header")).toContainText("Overdue")
+  await expect(panel.getByTestId("drawer-lines")).toBeVisible()
+  await expect(panel.getByTestId("drawer-scroll")).not.toContainText("Overdue")
+  await expect(panel.getByTestId("drawer-position")).toHaveText(/^\d+ of \d+$/)
+
+  await panel.getByTestId("drawer-pay").click()
+  await expect(drawer(page)).toHaveCount(0)
   expect(cents(await page.getByTestId("pay-total").textContent())).toBe(amount)
   await expect(page.getByTestId("pay-method")).toHaveText(/^ACH ••\d{4}/)
   await page.keyboard.press("Escape")
   await expect(page.getByTestId("pay-total")).toHaveCount(0)
 })
 
-test("a void invoice reads $0.00 due with the reason", async ({ page, baseURL }) => {
+test("a void invoice says why, and what was due, with no Pay", async ({ page, baseURL }) => {
   const db = await openLiveDb(page)
-  const voided = db.prepare("select id, total_cents totalCents from invoices where company_id = 'client_2' and status = 'void' limit 1").get() as
+  const voided = db.prepare("select id, total_cents totalCents from invoices where company_id = 'client_1' and status = 'void' limit 1").get() as
     | { id: string; totalCents: number }
     | undefined
   db.close()
-  test.skip(!voided, "the seeded database has no void invoice for this client")
-  await signInAs(page.context(), baseURL!, BRIGHTWAVE_HR)
-  await page.goto(`/client/finance/invoices/${encodeURIComponent(voided!.id)}`)
-  await expect(page.getByTestId("invoice-document")).toHaveAttribute("data-status", "void")
-  await expect(page.getByTestId("invoice-amount-due")).toHaveText("$0.00")
-  await expect(page.getByTestId("invoice-balance")).toHaveText("$0.00")
-  await expect(page.getByTestId("invoice-void-reason")).toBeVisible()
-  expect(cents(await page.getByTestId("invoice-total").textContent())).toBe(voided!.totalCents)
-  await expect(page.getByTestId("invoice-pay")).toHaveCount(0)
+  test.skip(!voided, "the seeded database has no void invoice for Acme")
+  await openLinked(page, baseURL!, voided!.id, ACME_HR)
+  const panel = drawer(page)
+  await expect(panel.getByTestId("drawer-header")).toContainText("Void")
+  await expect(panel.getByTestId("drawer-void-reason")).not.toBeEmpty()
+  await expect(panel.getByTestId("drawer-totals")).toContainText("Amount due (void)")
+  expect(cents(await panel.getByTestId("drawer-total").textContent())).toBe(voided!.totalCents)
+  await expect(panel.getByTestId("drawer-pay")).toHaveCount(0)
 })
 
-test("the person's Payments tab links each invoice to its page and labels the period", async ({ page, baseURL }) => {
+test("the person's Payments tab opens each invoice in the same drawer, links it to Finance, and labels the period", async ({ page, baseURL }) => {
   const db = await openLiveDb(page)
   const person = db
     .prepare(
@@ -232,50 +240,53 @@ test("the person's Payments tab links each invoice to its page and labels the pe
   const periods = await tab.getByTestId("person-invoice-period").allTextContents()
   expect(periods).toContain("Deposit")
   expect(periods.filter((text) => /\d{4}/.test(text)).length).toBeGreaterThan(0)
-  const href = await tab.getByTestId("person-invoice-link").first().getAttribute("href")
-  expect(href).toMatch(/^\/client\/finance\/invoices\/.+/)
-  await expect(tab.getByTestId("person-invoice-link").first()).toHaveAttribute("target", "_blank")
-  await expect(tab.getByTestId("person-invoice-link").first()).toHaveAttribute("rel", /noopener/)
   await expect(tab).not.toContainText("Pay invoices, see payment history")
-  await page.goto(href!)
-  await expect(page.getByTestId("invoice-document")).toBeVisible()
+
+  const first = tab.getByTestId("person-invoice-open").nth(1)
+  const href = (await first.getAttribute("href"))!
+  expect(href).toMatch(/^\/client\/finance\?open=.+/)
+  await expect(first).not.toHaveAttribute("target", "_blank")
+  const number = (await first.locator("span").first().textContent())!.trim()
+  await first.click()
+  await expect(drawer(page).getByTestId("drawer-number")).toHaveText(number)
+  await expect(drawer(page).getByTestId("drawer-position")).toHaveText(/^2 of \d+$/)
+  await expect(page).toHaveURL(new RegExp(`/client/people/${person.caseId}`))
+  await page.keyboard.press("Escape")
+  await expect(drawer(page)).toHaveCount(0)
+
+  await page.goto(href)
+  await expect(drawer(page).getByTestId("drawer-number")).toHaveText(number)
 })
 
-test("another company's invoice is a 404 page, the same as an unknown id; the owner opens it", async ({ page, baseURL }) => {
+test("a deep link to another company's invoice, or an unknown id, opens nothing; the owner's opens it", async ({ page, baseURL }) => {
   const db = await openLiveDb(page)
   const theirs = db.prepare("select id, number from invoices where company_id = 'client_1' and kind = 'payroll' limit 1").get() as {
     id: string
     number: string
   }
   db.close()
-  const url = (id: string) => `/client/finance/invoices/${encodeURIComponent(id)}`
 
-  await signInAs(page.context(), baseURL!, BRIGHTWAVE_HR)
-  const foreign = await page.goto(url(theirs.id))
-  // The page streams inside Suspense, so a missing invoice is the 404 screen with status 200.
-  expect([200, 404]).toContain(foreign!.status())
-  await expect(page.getByRole("heading", { name: "This page could not be found." })).toBeVisible()
-  await expect(page.getByTestId("invoice-document")).toHaveCount(0)
+  await openFinance(page, baseURL!)
+  await page.goto(invoiceDrawerHref(theirs.id))
+  await expect(board(page).getByTestId("invoice-row").first()).toBeVisible()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
   await expect(page.locator("body")).not.toContainText(theirs.number)
-  await page.goto(url("payroll:no-such-hire:1"))
-  await expect(page.getByRole("heading", { name: "This page could not be found." })).toBeVisible()
+  await page.goto(invoiceDrawerHref("payroll:no-such-hire:1"))
+  await expect(board(page).getByTestId("invoice-row").first()).toBeVisible()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
 
   await page.context().clearCookies()
-  await signInAs(page.context(), baseURL!, ACME_HR)
-  await page.goto(url(theirs.id))
-  await expect(page.getByTestId("invoice-number")).toHaveText(theirs.number)
+  await openLinked(page, baseURL!, theirs.id, ACME_HR)
+  await expect(drawer(page).getByTestId("drawer-number")).toHaveText(theirs.number)
 })
 
-test("print preview shows only the document: no sidebar, no actions", async ({ page, baseURL }) => {
+test("the old invoice page is gone; its PDF route stays", async ({ page, baseURL }) => {
   const db = await openLiveDb(page)
   const own = db.prepare("select id from invoices where company_id = 'client_2' and kind = 'payroll' limit 1").get() as { id: string }
   db.close()
   await signInAs(page.context(), baseURL!, BRIGHTWAVE_HR)
-  await page.goto(`/client/finance/invoices/${encodeURIComponent(own.id)}`)
-  await expect(page.getByTestId("invoice-document")).toBeVisible()
-  await page.emulateMedia({ media: "print" })
-  await expect(page.locator("aside")).toBeHidden()
-  await expect(page.getByTestId("invoice-actions")).toBeHidden()
-  await expect(page.getByRole("link", { name: "Back to Finance" })).toBeHidden()
-  await expect(page.getByTestId("invoice-totals")).toBeVisible()
+  const old = await page.goto(`/client/finance/invoices/${encodeURIComponent(own.id)}`)
+  expect(old!.status()).toBe(404)
+  const pdf = await download(page.request, `/client/finance/invoices/${encodeURIComponent(own.id)}/pdf`)
+  expect(pdf.response.status()).toBe(200)
 })

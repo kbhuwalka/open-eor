@@ -5,14 +5,14 @@ import path from "node:path"
 import { and, eq, inArray } from "drizzle-orm"
 import { afterAll, describe, expect, it } from "vitest"
 
-import { createDb, hireRequests, onboardingCases, SEED_IDS, tasks, type AppDatabase } from "@/db"
+import { createDb, hireRequests, onboardingCases, SEED_IDS, tasks, users, type AppDatabase } from "@/db"
 import { todayIso } from "@/domain/employment-term"
 import { DEFAULT_TASK_INBOX_QUERY, taskMatchesStatus, type TaskInboxQuery } from "@/lib/task-inbox-view"
 import { compareTaskUrgency } from "@/lib/task-order"
 import { taskUiFor } from "@/lib/task-ui-registry"
 
 import { loadTaskPage, taskNotice } from "../task-page"
-import { attentionFor, inboxTotals, nextTaskFor, openTaskCount, staffInbox, todoFor } from "../task-inbox"
+import { attentionFor, inboxTotals, nextTaskFor, openTaskCount, staffHome, staffInbox, todoFor } from "../task-inbox"
 import { inboxPage, roleQueue } from "../tasks"
 import { sessionUser } from "./helpers"
 
@@ -30,6 +30,26 @@ const AMARA = "user_worker_amara_aziz"
 const query = (patch: Partial<TaskInboxQuery> = {}): TaskInboxQuery => ({ ...DEFAULT_TASK_INBOX_QUERY, ...patch })
 
 const clientUsers = [SEED_IDS.users.clientHr, SEED_IDS.users.clientHr2, SEED_IDS.users.clientHr3]
+
+/** A fresh seeded database a test may write to, next to the shared read-only one. */
+const writableCopy = (): AppDatabase =>
+  createDb(path.join(dir, `copy-${Math.random().toString(36).slice(2)}.sqlite`), { forceSeed: false })
+
+/** A second onboarding specialist. The seed has one: the role works a single shared queue. */
+function addSpecialistColleague(db: AppDatabase) {
+  db.insert(users)
+    .values({
+      id: "user_specialist_colleague",
+      role: "onboarding_specialist",
+      displayName: "Casey Colleague",
+      email: "casey@northwind.example",
+      clientCompanyId: null,
+      providerId: SEED_IDS.provider,
+      createdAt: NOW,
+    })
+    .run()
+  return sessionUser(db, "user_specialist_colleague")
+}
 
 function companyOfCase(db: AppDatabase, caseId: string): string | undefined {
   return db
@@ -122,9 +142,9 @@ describe("ACL", () => {
   })
 
   it("gives staff of the same role the same queue", () => {
-    const db = open()
+    const db = writableCopy()
     const a = staffInbox(db, sessionUser(db, SEED_IDS.users.specialist), query({ size: 100 }), NOW)
-    const b = staffInbox(db, sessionUser(db, SEED_IDS.users.specialist2), query({ size: 100 }), NOW)
+    const b = staffInbox(db, addSpecialistColleague(db), query({ size: 100 }), NOW)
     expect(b.rows.map((row) => row.id)).toEqual(a.rows.map((row) => row.id))
   })
 
@@ -277,7 +297,7 @@ describe("staffInbox", () => {
     it("lists a task assigned to the viewer next to the queue, and keeps it from the colleague", () => {
       const db = copy()
       const first = specialist(db)
-      const colleague = sessionUser(db, SEED_IDS.users.specialist2)
+      const colleague = addSpecialistColleague(db)
       const before = whole(db, first)
       const target = before.rows[0]
       db.update(tasks).set({ assigneeKind: "user", assigneeUserId: first.id, assigneeRole: null }).where(eq(tasks.id, target.id)).run()
@@ -308,6 +328,38 @@ describe("staffInbox", () => {
       expect(risky.rows.map((row) => row.id)).toContain(blocker.id)
       expect(whole(db, finance(db), { status: "at_risk" }).rows.every((row) => row.caseId !== blocker.caseId || row.atRisk)).toBe(true)
     })
+  })
+})
+
+describe("staffHome", () => {
+  const specialist = (db: AppDatabase) => sessionUser(db, SEED_IDS.users.specialist)
+
+  it("is the whole filtered queue in the table's order, each row with its start date", () => {
+    const db = open()
+    const table = staffInbox(db, specialist(db), query({ size: 100 }), NOW)
+    const home = staffHome(db, specialist(db), query(), NOW)
+    expect(home.rows.map((row) => row.id)).toEqual(table.rows.map((row) => row.id))
+    expect(home.options).toEqual(table.options)
+    expect(home.empty).toBe(false)
+    for (const row of home.rows) expect(row.startDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it("is not cut at a page boundary and takes the same filters as the table", () => {
+    const db = open()
+    const total = staffInbox(db, specialist(db), query(), NOW).total
+    expect(staffHome(db, specialist(db), query({ size: 10, page: 2 }), NOW).rows).toHaveLength(total)
+    const [client] = staffInbox(db, specialist(db), query(), NOW).options.clients
+    const filtered = staffHome(db, specialist(db), query({ client: client.value, status: "overdue" }), NOW)
+    expect(filtered.rows.map((row) => row.id)).toEqual(
+      staffInbox(db, specialist(db), query({ client: client.value, status: "overdue", size: 100 }), NOW).rows.map((row) => row.id),
+    )
+  })
+
+  it("is empty for someone with no queue", () => {
+    const db = open()
+    const none = staffHome(db, sessionUser(db, SEED_IDS.users.clientHr2), query(), NOW)
+    expect(none.rows).toEqual([])
+    expect(none.empty).toBe(true)
   })
 })
 

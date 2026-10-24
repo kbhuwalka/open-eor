@@ -6,7 +6,7 @@ const { replace, searchParams } = vi.hoisted(() => ({ replace: vi.fn(), searchPa
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace }),
-  usePathname: () => "/finance/deposits",
+  usePathname: () => "/finance/receivables",
   useSearchParams: () => new URLSearchParams(searchParams.current),
 }))
 
@@ -30,19 +30,19 @@ describe("UrlPagination", () => {
     searchParams.current = "status=open&page=2"
     render(<UrlPagination {...props} />)
     await userEvent.click(screen.getByRole("button", { name: /previous/i }))
-    expect(replace).toHaveBeenCalledWith("/finance/deposits?status=open", { scroll: false })
+    expect(replace).toHaveBeenCalledWith("/finance/receivables?status=open", { scroll: false })
   })
 
   it("goes to the next page through the URL", async () => {
     render(<UrlPagination {...props} />)
     await userEvent.click(screen.getByRole("button", { name: /next/i }))
-    expect(replace).toHaveBeenCalledWith("/finance/deposits?page=3", { scroll: false })
+    expect(replace).toHaveBeenCalledWith("/finance/receivables?page=3", { scroll: false })
   })
 
   it("a prefix keeps a second list's page apart", async () => {
     searchParams.current = "page=4"
     render(<UrlPagination {...props} prefix="i" />)
     await userEvent.click(screen.getByRole("button", { name: /next/i }))
-    expect(replace).toHaveBeenCalledWith("/finance/deposits?page=4&ipage=3", { scroll: false })
+    expect(replace).toHaveBeenCalledWith("/finance/receivables?page=4&ipage=3", { scroll: false })
   })
 })

@@ -69,6 +69,14 @@ async function pickState(page: Page, testId: string, state: string) {
   await page.getByRole("option", { name: state }).first().click()
 }
 
+/** Enters what the document is before its file is chosen; leave out what the title implies or lacks. */
+async function describeDocument(page: Page, kind: string, doc: { title?: string; authority?: string; number: string; expiry?: string }) {
+  if (doc.title) await pickState(page, `doc-title-${kind}`, doc.title)
+  if (doc.authority) await fill(page, `doc-authority-${kind}`, doc.authority)
+  await fill(page, `doc-number-${kind}`, doc.number)
+  if (doc.expiry) await page.getByTestId(`doc-expiry-${kind}`).pressSequentially(doc.expiry)
+}
+
 /** Signs in the popup: consent, adopt the typed signature on every tag, finish. */
 async function signInPopup(page: Page) {
   const dialog = page.getByTestId("signing-dialog")
@@ -209,7 +217,16 @@ test.describe("employee onboarding", () => {
     await expect(page.getByTestId("submit-documents")).toBeDisabled()
     await page.getByTestId("path-list_b_c").check()
     await page.getByTestId("file-list_b").setInputFiles({ name: "license.png", mimeType: "image/png", buffer: PNG })
+    await expect(page.getByTestId("slot-list_b")).toContainText("Choose the document.")
+    await expect(page.getByTestId("send-file-list_b")).toContainText("license.png")
+    await describeDocument(page, "list_b", { title: "Driver's license", authority: "California DMV", number: "D4471920", expiry: "01312031" })
+    await shot(page, "journey-5-documents-details")
+    await page.getByTestId("send-file-list_b").click()
     await expect(page.getByTestId("upload-list_b")).toContainText("license.png")
+    await expect(page.getByTestId("upload-list_b")).toContainText("•••• 1920")
+    await expect(page.getByTestId("upload-list_b")).not.toContainText("D4471920")
+    await describeDocument(page, "list_c", { title: "Social Security Account Number card (unrestricted)", number: "123456789" })
+    await expect(page.getByTestId("doc-expiry-list_c")).toHaveCount(0)
     await page.getByTestId("file-list_c").setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("not an image") })
     await expect(page.getByTestId("upload-error-list_c")).toBeVisible()
     await page.getByTestId("file-list_c").setInputFiles({ name: "ssn-card.png", mimeType: "image/png", buffer: PNG })
@@ -343,6 +360,8 @@ test.describe("employee onboarding", () => {
 
     const kinds = await page.locator('[data-testid^="slot-"]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-testid")!.slice(5)))
     for (const kind of kinds) {
+      await page.getByTestId(`replace-${kind}`).click()
+      await describeDocument(page, kind, { number: kind === "list_c" ? "123456789" : "R7730215" })
       await page.getByTestId(`file-${kind}`).setInputFiles({ name: `${kind}-new.png`, mimeType: "image/png", buffer: PNG })
       await expect(page.getByTestId(`upload-${kind}`)).toContainText(`${kind}-new.png`)
     }

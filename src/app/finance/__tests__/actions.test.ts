@@ -34,7 +34,9 @@ vi.mock("@/db", async (importOriginal) => ({ ...(await importOriginal<typeof imp
 
 import {
   failPaymentAction,
-  markDepositNotReceivedAction,
+  loadFinanceInvoiceAction,
+  loadFinanceInvoiceDetailAction,
+  loadFinancePaymentAction,
   markDepositReceivedAction,
   runBillingAction,
   settlePaymentAction,
@@ -128,40 +130,57 @@ describe("finance actions", () => {
     expect(depositState(db, order.hireId).state).toBe("paid")
   })
 
-  it("not received: fails the in-flight payment with the optional reason, and says so plainly when there is none", async () => {
+  it("confirm received: an order with no deposit step waiting is refused, an unknown one is not found", async () => {
     const db = start()
-    const unpaid = setup(db, { email: "a@worker.example" })
+    const order = setup(db, { email: "a@worker.example" })
+    await markDepositReceivedAction(order.caseId)
+    expect(await markDepositReceivedAction(order.caseId)).toMatchObject({ ok: false, code: "ILLEGAL_TRANSITION" })
+    expect(await markDepositReceivedAction("case_missing")).toMatchObject({ ok: false, code: "not_found" })
+  })
+
+  it("fail on a deposit payment: fails it as deposit not received and reopens the client's Pay deposit step", async () => {
+    const db = start()
     const paid = setup(db, { email: "b@worker.example" })
     paid.driver.complete("pay_deposit")
     const [payment] = loadPaymentsForInvoices(db, [`deposit:${paid.hireId}`])
-    expect(await markDepositNotReceivedAction("")).toMatchObject({ ok: false, code: "validation" })
-    expect(await markDepositNotReceivedAction(paid.caseId, "x".repeat(301))).toMatchObject({ ok: false, code: "validation" })
-    expect(paymentStatus(db, payment.id)).toBe("initiated")
-
-    const refused = await markDepositNotReceivedAction(unpaid.caseId)
-    expect(refused).toMatchObject({ ok: false, code: "ILLEGAL_TRANSITION" })
-    expect(!refused.ok && refused.message).toBe(
-      "This order has no deposit payment in flight, so there is nothing to mark as not received. Refresh the page.",
-    )
-    expect(revalidatePath).not.toHaveBeenCalled()
-
-    expect(await markDepositNotReceivedAction(paid.caseId, "  ACH debit returned ")).toEqual({
-      ok: true,
-      data: { caseId: paid.caseId, paymentId: payment.id },
-    })
+    expect(await failPaymentAction(payment.id, "  ACH debit returned ")).toEqual({ ok: true, data: { paymentId: payment.id } })
     expect(db.select().from(payments).where(eq(payments.id, payment.id)).get()).toMatchObject({
       status: "failed",
       failureReason: "Deposit not received: ACH debit returned",
     })
     expect(depositState(db, paid.hireId).state).toBe("open")
+    expect(paid.driver.find("pay_deposit")).toBeDefined()
     expect(revalidatePath).toHaveBeenCalledWith("/finance", "layout")
     expect(revalidatePath).toHaveBeenCalledWith("/client", "layout")
-    expect(await markDepositNotReceivedAction(paid.caseId)).toMatchObject({ ok: false, code: "ILLEGAL_TRANSITION" })
   })
 
-  it("an unknown order reads as not found", async () => {
-    start()
-    expect(await markDepositNotReceivedAction("case_missing")).toMatchObject({ ok: false, code: "not_found" })
+  it("fail: a second press on a payment no longer waiting says so", async () => {
+    const db = start()
+    const paid = setup(db, { email: "c@worker.example" })
+    paid.driver.complete("pay_deposit")
+    const [payment] = loadPaymentsForInvoices(db, [`deposit:${paid.hireId}`])
+    await failPaymentAction(payment.id, "Returned")
+    vi.clearAllMocks()
+    expect(await failPaymentAction(payment.id, "Returned")).toMatchObject({
+      ok: false,
+      code: "ILLEGAL_TRANSITION",
+      message: "That payment is no longer waiting on Finance: it was already settled or marked failed. Refresh the page.",
+    })
+    expect(revalidatePath).not.toHaveBeenCalled()
+  })
+
+  it("loads a payment record, an invoice row and its detail for the drawer", async () => {
+    const db = start()
+    const [payment] = initiated(db)
+    const record = await loadFinancePaymentAction(payment.id)
+    expect(record?.payment).toMatchObject({ id: payment.id, status: "initiated", amountCents: payment.totalCents })
+    expect(record?.invoices.map((row) => row.id).sort()).toEqual(payment.invoices.map((ref) => ref.id).sort())
+    const invoiceId = payment.invoices[0].id
+    expect(await loadFinanceInvoiceAction(invoiceId)).toMatchObject({ id: invoiceId, displayStatus: "processing" })
+    expect((await loadFinanceInvoiceDetailAction(invoiceId))?.payments.some((entry) => entry.paymentId === payment.id)).toBe(true)
+    expect(await loadFinancePaymentAction("pay_missing")).toBeNull()
+    expect(await loadFinanceInvoiceAction("")).toBeNull()
+    expect(await loadFinanceInvoiceDetailAction(42)).toBeNull()
   })
 
   it("void: needs a reason; voids an open invoice; refuses one a payment covers", async () => {
@@ -198,9 +217,13 @@ describe("finance actions: ACL", () => {
     ["settlePaymentsAction", (id) => settlePaymentsAction([id])],
     ["failPaymentAction", (id) => failPaymentAction(id, "x")],
     ["markDepositReceivedAction", (id) => markDepositReceivedAction(id)],
-    ["markDepositNotReceivedAction", (id) => markDepositNotReceivedAction(id, "x")],
     ["voidInvoiceAction", (id) => voidInvoiceAction(id, "x")],
     ["runBillingAction", () => runBillingAction()],
+  ]
+  const loaders: [string, (id: string) => Promise<unknown>][] = [
+    ["loadFinancePaymentAction", (id) => loadFinancePaymentAction(id)],
+    ["loadFinanceInvoiceAction", (id) => loadFinanceInvoiceAction(id)],
+    ["loadFinanceInvoiceDetailAction", (id) => loadFinanceInvoiceDetailAction(id)],
   ]
   const roles: [string, (db: AppDatabase) => SessionUser][] = [
     ["client_hr", () => alex],
@@ -218,9 +241,11 @@ describe("finance actions: ACL", () => {
     expect(paymentStatus(db, payment.id)).toBe("initiated")
     expect(JSON.stringify(db.select().from(invoices).all())).toBe(before)
     expect(revalidatePath).not.toHaveBeenCalled()
+    for (const [, load] of loaders) await expect(load(payment.id)).rejects.toThrow()
   })
 
   it("a visitor without a session is unauthenticated", async () => {
     for (const [, call] of actions) expect(await call("x")).toMatchObject({ ok: false, code: "unauthenticated" })
+    for (const [, load] of loaders) await expect(load("x")).rejects.toThrow("Sign in")
   })
 })

@@ -182,11 +182,13 @@ export const DEPOSIT_NOT_RECEIVED = "Deposit not received"
  * Finance: the client's deposit payment is in flight and the money did not arrive. Fails that
  * payment through the same path as "Mark failed" (so the invoice is Due or Overdue again and the
  * client can pay again); there is no state of its own. Refused when the order has no initiated
- * deposit payment (nothing to fail). `reason`, when given, follows "Deposit not received".
+ * deposit payment (nothing to fail). `reason`, when given, follows "Deposit not received". With
+ * `paymentId`, also refused unless that is the payment in flight, so a stale screen can never fail
+ * a newer payment the client made since.
  */
 export function markDepositNotReceived(
   deps: CaseServiceDeps,
-  input: { actor: SessionUser; caseId: string; reason?: string },
+  input: { actor: SessionUser; caseId: string; reason?: string; paymentId?: string },
 ): { caseId: string; paymentId: string } {
   assertRole(input.actor, "finance")
   const detail = input.reason?.trim()
@@ -196,6 +198,9 @@ export function markDepositNotReceived(
     const { state, invoice } = depositState(tx, record.hireId)
     const payment =
       state === "processing" && invoice ? loadPaymentsForInvoices(tx, [invoice.id]).find((p) => p.status === "initiated") : undefined
+    if (input.paymentId !== undefined && payment?.id !== input.paymentId) {
+      throw new DomainError("ILLEGAL_TRANSITION", { entity: "payment", paymentId: input.paymentId, to: "failed" })
+    }
     if (!payment) throw new DomainError("ILLEGAL_TRANSITION", { entity: "deposit", caseId: input.caseId, to: "not_received" })
     failPaymentInTx(tx, deps, input.actor, payment.id, reason)
     return { caseId: input.caseId, paymentId: payment.id }

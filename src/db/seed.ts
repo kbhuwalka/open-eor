@@ -32,6 +32,7 @@ import { idFor, type CaseServiceDeps } from "@/server/deps"
 import { storeIdentityDocument } from "@/server/employee-tasks"
 import { prepareMasterAgreement, signMasterAgreementDocument } from "@/server/master-agreement"
 import { encryptFields } from "@/server/field-crypto"
+import { handlerPayload, storedSection2Documents } from "@/server/onboarding-portal/i9-review"
 import { completeTaskAsActor, rejectTaskAsActor, tasksForCase } from "@/server/tasks"
 
 import type { AppDatabase } from "./client"
@@ -72,9 +73,7 @@ export const SEED_IDS = {
     worker: "user_worker",
     worker2: "user_worker_2",
     specialist: "user_specialist_1",
-    specialist2: "user_specialist_2",
     finance: "user_finance_1",
-    finance2: "user_finance_2",
     clientHr2: "user_client_hr_2",
     clientHr3: "user_client_hr_3",
   },
@@ -318,28 +317,10 @@ function seedWorld(db: SeedExecutor, agreements: "signed" | "draft"): void {
         createdAt: worldStart,
       },
       {
-        id: SEED_IDS.users.specialist2,
-        role: "onboarding_specialist",
-        displayName: "Riley Chen",
-        email: "riley@northwind.example",
-        clientCompanyId: null,
-        providerId: SEED_IDS.provider,
-        createdAt: worldStart,
-      },
-      {
         id: SEED_IDS.users.finance,
         role: "finance",
         displayName: "Morgan Reyes",
         email: "morgan@northwind.example",
-        clientCompanyId: null,
-        providerId: SEED_IDS.provider,
-        createdAt: worldStart,
-      },
-      {
-        id: SEED_IDS.users.finance2,
-        role: "finance",
-        displayName: "Dana Whitfield",
-        email: "dana@northwind.example",
         clientCompanyId: null,
         providerId: SEED_IDS.provider,
         createdAt: worldStart,
@@ -763,7 +744,11 @@ function runScenario(db: AppDatabase, person: RosterPerson, used: Set<string>): 
         workerName: person.name,
         savedMethodId: company.method.id,
       })
-      completeTaskAsActor(deps, { actor, taskId: task.id, payload })
+      completeTaskAsActor(deps, {
+        actor,
+        taskId: task.id,
+        payload: task.type === "verify_i9_section2" ? verifiedSection2Payload(db, caseId, isoDay(clock)) : payload,
+      })
     }
     throw new Error(`seed: scenario ${person.key} did not settle`)
   }
@@ -788,6 +773,13 @@ function runScenario(db: AppDatabase, person: RosterPerson, used: Set<string>): 
     stall = person.stallAfterReactivate ?? []
     simulate(SEED_NOW)
   }
+}
+
+/** A seeded Section 2 records the documents as the worker entered them, like the drawer does. */
+function verifiedSection2Payload(db: AppDatabase, caseId: string, today: string) {
+  const stored = storedSection2Documents(db, caseId, today)
+  if (stored.state !== "ready") throw new Error(`seed: case ${caseId} cannot be verified (${stored.state})`)
+  return handlerPayload(stored)
 }
 
 /**
@@ -938,9 +930,7 @@ export function listPersonas(db: AppDatabase) {
     SEED_IDS.users.worker,
     SEED_IDS.users.worker2,
     SEED_IDS.users.specialist,
-    SEED_IDS.users.specialist2,
     SEED_IDS.users.finance,
-    SEED_IDS.users.finance2,
   ]
   return db
     .select()

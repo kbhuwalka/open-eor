@@ -154,8 +154,12 @@ Invariant U1: exactly one of `client_company_id` / `provider_id` is non-null, ma
 | `file_name` | text | no | original name, sanitized |
 | `uploaded_by` | text FK → `users.id` | no | |
 | `created_at` | ts | no | |
+| `document_title` | text | yes | what the employee says the document is, a title from `IDENTITY_DOCUMENT_TYPES` for its list |
+| `issuing_authority` | text | yes | entered by the employee, or implied by the title ("U.S. Department of State" for a U.S. passport) |
+| `document_number_encrypted` | text | yes | the document number, AES-256-GCM (`encryptSecret`) with AAD `case_documents:<id>`; never logged, never in an event, task result or list |
+| `expires_on` | date text | yes | null when the document has no expiration date |
 
-Active document per `(case_id, kind)` = max `created_at`, and a new list document supersedes the other I-9 list's active documents ([domain.md](./domain.md) W4, W4a). Suggested index: `(case_id, kind, created_at)`.
+The four detail columns are the employee's entry at upload ([employee-portal.md](./employee-portal.md) §3.1) and what Section 2 is filled from; the specialist cannot change them. They are added by `ensureColumn` to a database from before them, where every existing row has them null: such a legacy upload can only be sent back. Active document per `(case_id, kind)` = max `created_at`, and a new list document supersedes the other I-9 list's active documents ([domain.md](./domain.md) W4, W4a). Suggested index: `(case_id, kind, created_at)`.
 
 ### `case_events` (append-only)
 
@@ -404,8 +408,8 @@ The world (tenancy, staff, roles, saved payment methods) is inserted directly. *
 | `user_client_hr` | users | Alex Harper, `client_hr`, `client_1` |
 | `user_client_hr_2`, `user_client_hr_3` | users | Priya Raman (`client_2`), Marcus Hale (`client_3`), `client_hr` |
 | `user_worker_2` | users | Taylor Kim, `worker` — **no case**; a persona only, since "Start a hire" creates its own person ([domain.md](./domain.md) H1) |
-| `user_specialist_1`, `user_specialist_2` | users | Sam Ortiz, Riley Chen, `onboarding_specialist`, provider `provider_1` |
-| `user_finance_1`, `user_finance_2` | users | Morgan Reyes, Dana Whitfield, `finance`, provider `provider_1` |
+| `user_specialist_1` | users | Sam Ortiz, `onboarding_specialist`, provider `provider_1`; the only specialist, because the role works one shared queue |
+| `user_finance_1` | users | Morgan Reyes, `finance`, provider `provider_1`; the only Finance user, for the same reason |
 | `user_worker`, `hire_1`, `case_pending_1`, `doc_list_a_1` | users, hire_requests, onboarding_cases, case_documents | Jordan Lee, the canonical case: ordered 6 days ago, start 8 days out; everything done except `verify_i9_section2`, so it is the specialist's work item |
 
 Time is relative to the seed clock (`SEED_NOW`, the current time floored to the hour), so the demo always reads as recent. Other people use ids `user_worker_<key>` / `hire_<key>` / `case_<key>`, where `<key>` is derived from the generated name. Scenarios run oldest order first so deposit invoice numbers rise with the calendar.
@@ -436,7 +440,7 @@ Time is relative to the seed clock (`SEED_NOW`, the current time floored to the 
 | `terminated` | 3 / 1 / 0 | onboarded, started, then terminated; billing stopped at the last working day |
 | `terminated_reactivated` | 1 / 0 / 0 | terminated, then reactivated (active again; the gap is billed, see [billing-and-invoicing.md](./billing-and-invoicing.md) §12) |
 
-Roster workers are **not** personas on `/pick` (`listPersonas` returns the canonical users only: three client HR users, two workers, two specialists, two Finance users). The mix covers every person status, at-risk people, rework history and each lifecycle path.
+`listPersonas` (a seed helper) returns the canonical users only: three client HR users, two workers, one specialist and one Finance user. On `/pick` every employee, canonical or roster, is reached through the employee search, and the three who most recently went live also get tiles (ui-guidelines C14). The mix covers every person status, at-risk people, rework history and each lifecycle path.
 
 ### 5.2 Billing history
 

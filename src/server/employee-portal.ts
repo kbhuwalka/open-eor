@@ -24,6 +24,7 @@ import {
 import { payPeriodContaining } from "@/domain/billing"
 import { todayIso } from "@/domain/employment-term"
 import { US_2026 } from "@/domain/cost-rates"
+import { maskDocumentNumber } from "@/domain/forms"
 import { personStatusFor, type PersonStatus } from "@/domain/person-status"
 import {
   projectStages,
@@ -58,6 +59,7 @@ import type {
 import { stateName } from "@/lib/us-states"
 
 import { decryptFields, maskSsn } from "./field-crypto"
+import { identityDetailsOf } from "./identity-documents"
 import { rowToTask } from "./task-store"
 
 export type EmployeeCase = {
@@ -236,6 +238,7 @@ export function uploadsFor(db: AppDatabase, employee: EmployeeCase): EmployeeUpl
         : verified.length > 0 && doc.createdAt <= reviewedAt
           ? "accepted"
           : "uploaded"
+    const details = identityDetailsOf(doc)
     return {
       id: doc.id,
       kind: doc.kind as DocumentKind,
@@ -244,6 +247,12 @@ export function uploadsFor(db: AppDatabase, employee: EmployeeCase): EmployeeUpl
       mime: mimeForFileName(doc.fileName),
       href: `/api/documents/${doc.id}`,
       status,
+      details: details && {
+        title: details.title,
+        issuingAuthority: details.issuingAuthority,
+        maskedNumber: maskDocumentNumber(details.number),
+        expiresOn: details.expiresOn,
+      },
     }
   })
 }

@@ -15,7 +15,7 @@ import { loadEmployeeCase, uploadsFor } from "../employee-portal"
 import { submitDocuments, uploadIdentityDocument } from "../employee-tasks"
 import { completeTaskAsActor, tasksForCase } from "../tasks"
 
-import { sessionUser, setup, tempDbFactory } from "./helpers"
+import { SAMPLE_IDENTITY_DETAILS, sessionUser, setup, tempDbFactory } from "./helpers"
 
 const openDb = tempDbFactory()
 
@@ -45,7 +45,14 @@ function atUpload(db: AppDatabase) {
   const taskId = tasksForCase(db, ctx.caseId).find((task) => task.key === "upload_documents")!.id
   const upload = async (kind: "list_a" | "list_b" | "list_c") => {
     ctx.clock.advanceHours(1)
-    return uploadIdentityDocument(ctx.deps, worker, { taskId, kind, fileName: `${kind}.png`, declaredType: "image/png", bytes: PNG })
+    return uploadIdentityDocument(ctx.deps, worker, {
+      taskId,
+      kind,
+      fileName: `${kind}.png`,
+      declaredType: "image/png",
+      bytes: PNG,
+      details: SAMPLE_IDENTITY_DETAILS[kind],
+    })
   }
   const activeKinds = () => uploadsFor(db, loadEmployeeCase(db, worker.id, ctx.clock.now)!).map((doc) => doc.kind)
   return { ...ctx, worker, specialist, taskId, upload, activeKinds }
@@ -115,7 +122,7 @@ describe("switching the I-9 document list supersedes the other list", () => {
     expect(readIdentityUpload(db, ctx.specialist, b.id)).toMatchObject({ ok: true })
   })
 
-  it("shows the specialist only the active list to verify, and marks the rest replaced", async () => {
+  it("shows the specialist only the active list to verify, with its details, and marks the rest replaced", async () => {
     const db = openDb()
     const ctx = atUpload(db)
     await ctx.upload("list_b")
@@ -127,8 +134,8 @@ describe("switching the I-9 document list supersedes the other list", () => {
     const verifyId = tasksForCase(db, ctx.caseId).find((task) => task.key === "verify_i9_section2")!.id
     const review = loadI9Review(db, ctx.specialist, verifyId, ctx.clock.now)!
     expect(review.documents.map((doc) => doc.id)).toEqual([a.id])
-    expect(review.comboValid).toBe(true)
-    expect(review.replaced.map((doc) => doc.kind).sort()).toEqual(["list_b", "list_c"])
+    expect(review.readiness).toBe("ready")
+    expect(review.documents[0].details).toMatchObject({ title: "U.S. Passport" })
 
     const detail = staffCaseDetail(db, ctx.specialist, ctx.caseId, ctx.clock.now)
     const reviews = Object.fromEntries((detail?.uploads ?? []).map((upload) => [upload.kind, upload.review]))

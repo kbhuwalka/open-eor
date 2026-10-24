@@ -7,6 +7,7 @@
 export * from "./primitives"
 export * from "./w4"
 export * from "./i9"
+export * from "./identity-document"
 export * from "./direct-deposit"
 export * from "./signing"
 export * from "./personal-details"

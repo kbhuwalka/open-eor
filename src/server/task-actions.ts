@@ -14,7 +14,7 @@ import { getDb } from "@/db"
 import { fail, toActionError, type ActionResult } from "@/server/action-result"
 import { completeTaskAsActor, rejectTaskAsActor } from "@/server/tasks"
 import { withNotice } from "@/lib/task-notice"
-import { portalForRole } from "@/lib/task-ui-registry"
+import { portalForRole, portalHomeHref } from "@/lib/task-ui-registry"
 
 import { DEDICATED_COMPLETION_TYPES } from "./dedicated-task-types"
 import { nextTaskFor } from "./task-inbox"
@@ -41,7 +41,7 @@ function finish(
   const title = loadTaskPage(db, user, portal, taskId, now)?.row.title ?? "The task"
   revalidatePath(`/${portal}`, "layout")
   return {
-    nextHref: withNotice(next ? next.href : `/${portal}`, taskId),
+    nextHref: withNotice(next ? next.href : portalHomeHref(portal), taskId),
     nextTitle: next ? next.title : null,
     message: `${doneMessage(title)} ${next ? `Next up: ${next.title}.` : "You're all caught up."}`,
   }

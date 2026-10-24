@@ -1,235 +1,365 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import Link from "next/link"
-import { CircleAlert, Download, ExternalLink } from "lucide-react"
+import { useEffect, useState, type ReactNode } from "react"
+import { cn } from "cn"
+import { Download } from "lucide-react"
 
+import { RowOpener } from "@/components/dense-list"
+import {
+  DrawerBody,
+  DrawerFact as Fact,
+  DrawerFacts,
+  DrawerHeader,
+  DrawerIconAction,
+  DrawerLoadError,
+  DrawerShell,
+  DrawerSubhead as Subhead,
+  type DrawerHeaderProps,
+  type DrawerStepperProps,
+} from "@/components/drawer/drawer-shell"
 import { InvoiceStatusBadge, PaymentStatusBadge } from "@/components/finance/invoice-status-badge"
 import { MoneyCell } from "@/components/finance/money-cell"
-import { SummaryCard, SummaryRow } from "@/components/summary-card"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatIsoDay } from "@/lib/finance-format"
+import { formatHistoryWhen, invoiceHistory } from "@/lib/finance-portal-view"
+import { STAFF_INVOICE_STATUS_LABEL } from "@/lib/finance-staff-view"
 import {
   INVOICE_KIND_LABEL,
   invoicePeriodLabel,
   invoiceRowProration,
   isPayableRow,
   type InvoiceDetail,
+  type InvoicePaymentEntry,
   type InvoiceRow,
 } from "@/lib/finance-view"
 import { formatCents } from "@/lib/format"
 
-type Loaded = { id: string; detail: InvoiceDetail | null }
+type Loaded = { detail: InvoiceDetail | null }
 
-export type InvoiceDrawerProps = {
-  /** The row that was clicked; `null` closes the drawer. */
-  row: InvoiceRow | null
+/**
+ * What the Finance role's drawer adds to the client's invoice (ui-guidelines C45, staff variant):
+ * the client in the facts, its own actions around Download PDF, payments that open in the drawer
+ * and a compact history. Everything else is the client's drawer as is.
+ */
+export type InvoiceStaffSlots = {
+  clientName: string
+  /** Header actions before Download PDF (Mark as paid). */
+  leadingActions?: ReactNode
+  /** Header actions after Download PDF (the "More actions" menu). */
+  trailingActions?: ReactNode
+  /** Swaps the drawer to one of the invoice's payments; `paymentIds` are all of them, newest first. */
+  onOpenPayment: (paymentId: string, paymentIds: string[]) => void
+  paymentHref?: (paymentId: string) => string
+}
+
+export type InvoicePanelProps = {
+  /** The invoice shown; the header and the facts come from it at once, the lines load. */
+  row: InvoiceRow
   /** Must be referentially stable (a module-level function or a server action). */
   loadDetail: (invoiceId: string) => Promise<InvoiceDetail | null>
   pdfHref: (invoiceId: string) => string
-  /** Where the full invoice page lives; without it the drawer has no "View full invoice" link. */
-  invoiceHref?: (invoiceId: string) => string
+  /** Whether the viewer can pay at all (a saved method is on file); Pay shows only when true. */
   canPay: boolean
   onPay: (row: InvoiceRow) => void
-  onClose: () => void
+  stepper?: DrawerStepperProps
+  back?: DrawerHeaderProps["back"]
+  staff?: InvoiceStaffSlots
 }
 
 /**
- * Right-hand quick preview of one invoice: who it is for, the service period, the line items
- * grouped with their subtotals, the total and the payment history, with a link to the full invoice
- * and the PDF. The header, person and period come from the row immediately; the lines load behind
- * a skeleton, and a failed load says so with a Try again button, so lines are never silently
- * missing.
+ * One invoice inside a `DrawerShell` (docs/client-finance.md §2a): number and status, what kind of
+ * invoice it is, Pay (only while payable and the viewer can pay) and Download PDF in the fixed
+ * header; then the facts, the lines grouped with their subtotals, the total and amount due, and
+ * the payment history when there is one. The lines load behind a skeleton; a failed load says the
+ * total and that the breakdown is missing, with Try again, so lines are never silently missing.
+ * Render it keyed by the invoice id so each invoice starts loading afresh.
  */
-export function InvoiceDrawer({ row, loadDetail, pdfHref, invoiceHref, canPay, onPay, onClose }: InvoiceDrawerProps) {
-  const rowId = row?.id ?? null
+export function InvoicePanel({ row, loadDetail, pdfHref, canPay, onPay, stepper, back, staff }: InvoicePanelProps) {
   const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
-    if (!rowId) return
     let cancelled = false
-    loadDetail(rowId)
-      .then((detail) => !cancelled && setLoaded({ id: rowId, detail }))
-      .catch(() => !cancelled && setLoaded({ id: rowId, detail: null }))
+    loadDetail(row.id)
+      .then((detail) => !cancelled && setLoaded({ detail }))
+      .catch(() => !cancelled && setLoaded({ detail: null }))
     return () => {
       cancelled = true
     }
-  }, [rowId, loadDetail, attempt])
+  }, [row.id, loadDetail, attempt])
 
   function retry() {
     setLoaded(null)
     setAttempt((n) => n + 1)
   }
 
-  const current = loaded && loaded.id === rowId ? loaded : null
-  const detail = current?.detail ?? null
-  const shown = detail ?? row
+  const detail = loaded?.detail ?? null
+  const shown: InvoiceRow = detail ?? row
 
   return (
-    <Dialog open={row !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent
-        data-testid="invoice-drawer"
-        className="inset-y-0 top-0 right-0 left-auto h-dvh max-w-none translate-x-0 translate-y-0 flex flex-col overflow-y-auto rounded-none p-0 sm:max-w-md"
-      >
-        {shown ? (
-          <div className="flex min-h-full flex-1 flex-col">
-            <div className="flex flex-col gap-6 p-6">
-              <header className="flex flex-col gap-1.5 pr-8">
-                <div className="flex items-center gap-3">
-                  <DialogTitle className="text-base" data-testid="drawer-number">
-                    {shown.number}
-                  </DialogTitle>
-                  <InvoiceStatusBadge status={shown.displayStatus} />
-                </div>
-                <DialogDescription>{INVOICE_KIND_LABEL[shown.kind]} invoice</DialogDescription>
-              </header>
-
-              <SummaryCard data-testid="drawer-summary">
-                <SummaryRow label="For">
-                  <span className="flex flex-col items-end" data-testid="drawer-person">
-                    <span>{detail?.person.name ?? shown.personName}</span>
-                    {(detail?.person.title ?? shown.personTitle) ? (
-                      <span className="text-xs text-muted-foreground">{detail?.person.title ?? shown.personTitle}</span>
-                    ) : null}
-                  </span>
-                </SummaryRow>
-                <SummaryRow label="Service period">
-                  <span className="flex flex-col items-end" data-testid="drawer-period">
-                    <span>{invoicePeriodLabel(shown)}</span>
-                    {invoiceRowProration(shown) ? (
-                      <span className="text-xs text-muted-foreground">{invoiceRowProration(shown)}</span>
-                    ) : null}
-                  </span>
-                </SummaryRow>
-                {shown.payDate ? <SummaryRow label="Pay date">{formatIsoDay(shown.payDate)}</SummaryRow> : null}
-                <SummaryRow label="Issued">{formatIsoDay(shown.issueDate)}</SummaryRow>
-                <SummaryRow label="Due">{formatIsoDay(shown.dueDate)}</SummaryRow>
-                {shown.paidDate ? <SummaryRow label="Paid">{formatIsoDay(shown.paidDate)}</SummaryRow> : null}
-              </SummaryCard>
-
-              <section className="flex flex-col gap-2" aria-label="Line items">
-                <h3 className="text-sm font-medium">Line items</h3>
-                {detail ? (
-                  <SummaryCard data-testid="drawer-lines">
-                    {detail.groups.map((group) => (
-                      <div key={group.group} className="not-first:border-t not-first:border-border" data-testid="drawer-group">
-                        <p className="bg-muted/60 px-4 py-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                          {group.label}
-                        </p>
-                        {group.lines.map((line) => (
-                          <div key={line.code} className="flex items-start justify-between gap-4 px-4 py-2.5" data-testid="drawer-line">
-                            <div className="flex min-w-0 flex-col">
-                              <span>{line.title}</span>
-                              {line.basis ? <span className="text-xs text-muted-foreground">{line.basis}</span> : null}
-                            </div>
-                            <span className="shrink-0 tabular-nums" data-testid="drawer-line-amount">
-                              {formatCents(line.amountCents)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                    <SummaryRow label="Total" strong>
-                      <span data-testid="drawer-total">{formatCents(detail.totalCents)}</span>
-                    </SummaryRow>
-                    {detail.displayStatus !== "paid" ? (
-                      <SummaryRow label={detail.displayStatus === "void" ? "Amount due (void)" : "Amount due"} strong>
-                        <span data-testid="drawer-due">{formatCents(detail.amountDueCents)}</span>
-                      </SummaryRow>
-                    ) : null}
-                  </SummaryCard>
-                ) : current ? (
-                  <Alert variant="destructive" data-testid="drawer-unavailable">
-                    <CircleAlert aria-hidden />
-                    <AlertTitle>The line items could not be loaded</AlertTitle>
-                    <AlertDescription>
-                      <p>The invoice total is {formatCents(shown.totalCents)}, but its breakdown is missing. Nothing has been changed.</p>
-                      <Button variant="outline" size="sm" className="mt-2" onClick={retry} data-testid="drawer-retry">
-                        Try again
-                      </Button>
-                    </AlertDescription>
-                  </Alert>
-                ) : (
-                  <div className="flex flex-col gap-3 rounded-lg border border-border p-4" aria-busy data-testid="drawer-loading">
-                    {[0, 1, 2, 3].map((i) => (
-                      <div key={i} className="flex justify-between gap-6">
-                        <Skeleton className="h-4 w-40" />
-                        <Skeleton className="h-4 w-16" />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              {detail ? (
-                <section className="flex flex-col gap-2" aria-label="Payment history">
-                  <h3 className="text-sm font-medium">Payment history</h3>
-                  {detail.payments.length === 0 ? (
-                    <p className="text-sm text-muted-foreground" data-testid="drawer-no-payments">
-                      No payments yet.
-                    </p>
-                  ) : (
-                    <ul className="divide-y divide-border rounded-lg border border-border text-sm" data-testid="drawer-payments">
-                      {detail.payments.map((payment) => (
-                        <li key={payment.paymentId} className="flex items-start justify-between gap-4 px-4 py-3">
-                          <div className="flex flex-col gap-1">
-                            <PaymentStatusBadge status={payment.status} className="w-fit" />
-                            <span className="text-xs text-muted-foreground">
-                              {payment.methodLabel} · started {formatIsoDay(payment.initiatedAt)}
-                              {payment.settledAt && payment.status === "settled"
-                                ? ` · settled ${formatIsoDay(payment.settledAt)}`
-                                : ""}
-                            </span>
-                            {payment.failureReason ? (
-                              <span className="text-xs text-status-danger-foreground">{payment.failureReason}</span>
-                            ) : null}
-                          </div>
-                          <MoneyCell cents={payment.amountCents} className="shrink-0" />
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </section>
-              ) : null}
-            </div>
-
-            <footer className="sticky bottom-0 mt-auto flex flex-wrap items-center gap-2 border-t border-border bg-popover px-6 py-4">
-              {isPayableRow(shown) ? (
-                <Button disabled={!canPay} onClick={() => onPay(shown)} data-testid="drawer-pay">
-                  Pay {formatCents(shown.totalCents)}
-                </Button>
-              ) : null}
-              {invoiceHref ? (
-                <Button
-                  variant="outline"
-                  nativeButton={false}
-                  render={<Link href={invoiceHref(shown.id)} />}
-                  data-testid="drawer-full-invoice"
-                >
-                  <ExternalLink data-icon="inline-start" />
-                  View full invoice
-                </Button>
-              ) : null}
-              <Button
-                variant="outline"
-                nativeButton={false}
-                render={<a href={pdfHref(shown.id)} download />}
-                data-testid="drawer-pdf"
-              >
-                <Download data-icon="inline-start" />
-                Download PDF
+    <>
+      <DrawerHeader
+        stepper={stepper}
+        back={back}
+        title={shown.number}
+        titleTestId="drawer-number"
+        status={<InvoiceStatusBadge status={shown.displayStatus} labels={staff ? STAFF_INVOICE_STATUS_LABEL : undefined} />}
+        subtitle={`${INVOICE_KIND_LABEL[shown.kind]} invoice`}
+        actions={
+          <>
+            {canPay && isPayableRow(shown) ? (
+              <Button onClick={() => onPay(shown)} data-testid="drawer-pay">
+                Pay {formatCents(shown.totalCents)}
               </Button>
-              <DialogClose render={<Button variant="ghost" />} className="ml-auto">
-                Close
-              </DialogClose>
-            </footer>
+            ) : null}
+            {staff?.leadingActions}
+            <DrawerIconAction
+              href={pdfHref(shown.id)}
+              download
+              label="Download PDF"
+              icon={<Download />}
+              testId="drawer-pdf"
+            />
+            {staff?.trailingActions}
+          </>
+        }
+      />
+      <DrawerBody>
+        <Facts row={shown} detail={detail} clientName={staff?.clientName} />
+        {detail ? (
+          <>
+            <Lines detail={detail} />
+            {detail.payments.length > 0 ? (
+              <Payments
+                payments={detail.payments}
+                title={staff ? "Payments on this invoice" : "Payments"}
+                onOpen={staff?.onOpenPayment}
+                href={staff?.paymentHref}
+              />
+            ) : null}
+            {staff ? <History detail={detail} /> : null}
+          </>
+        ) : loaded ? (
+          <DrawerLoadError title="The line items could not be loaded" onRetry={retry} testId="drawer-unavailable">
+            <p>The invoice total is {formatCents(shown.totalCents)}, but its breakdown is missing. Nothing has been changed.</p>
+          </DrawerLoadError>
+        ) : (
+          <div className="flex flex-col gap-3" aria-busy data-testid="drawer-loading">
+            <Skeleton className="h-3 w-24" />
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex justify-between gap-6">
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-4 w-16" />
+              </div>
+            ))}
+          </div>
+        )}
+      </DrawerBody>
+    </>
+  )
+}
+
+export type InvoiceDrawerProps = Omit<InvoicePanelProps, "row" | "stepper" | "back"> & {
+  /** The invoice to show; `null` closes the drawer. */
+  row: InvoiceRow | null
+  /** The invoice's place in the list it was opened from; omitted (or a list of one) shows no stepper. */
+  stepper?: DrawerStepperProps
+  onClose: () => void
+}
+
+/** The invoice drawer on its own, for a list of invoices (the person Payments tab). */
+export function InvoiceDrawer({ row, onClose, ...panel }: InvoiceDrawerProps) {
+  return (
+    <DrawerShell open={row !== null} onClose={onClose} data-testid="invoice-drawer">
+      {row ? <InvoicePanel key={row.id} row={row} {...panel} /> : null}
+    </DrawerShell>
+  )
+}
+
+/** Who, when and how much is owed, as one compact block. Overdue is already said by the header badge. */
+function Facts({ row, detail, clientName }: { row: InvoiceRow; detail: InvoiceDetail | null; clientName?: string }) {
+  const name = detail?.person.name ?? row.personName
+  const title = detail?.person.title ?? row.personTitle
+  const proration = invoiceRowProration(row)
+  return (
+    <DrawerFacts data-testid="drawer-facts">
+      {clientName ? (
+        <Fact label="Client" testId="drawer-client">
+          {clientName}
+        </Fact>
+      ) : null}
+      <Fact label="For" testId="drawer-person">
+        <span>{name}</span>
+        {title ? <span className="text-muted-foreground"> · {title}</span> : null}
+      </Fact>
+      <Fact label="Service period" testId="drawer-period">
+        <span className="tabular-nums">{invoicePeriodLabel(row)}</span>
+        {proration ? <span className="block text-xs text-muted-foreground">{proration}</span> : null}
+      </Fact>
+      {row.payDate ? (
+        <Fact label="Pay date">
+          <span className="tabular-nums">{formatIsoDay(row.payDate)}</span>
+        </Fact>
+      ) : null}
+      {clientName ? (
+        <Fact label="Issued" testId="drawer-issued">
+          <span className="tabular-nums">{formatIsoDay(row.issueDate)}</span>
+        </Fact>
+      ) : null}
+      <Fact label="Due" testId="drawer-due-date">
+        <span className="tabular-nums">{formatIsoDay(row.dueDate)}</span>
+      </Fact>
+      {row.paidDate ? (
+        <Fact label="Paid" testId="drawer-paid-date">
+          <span className="tabular-nums">{formatIsoDay(row.paidDate)}</span>
+        </Fact>
+      ) : null}
+      {detail?.voidReason ? (
+        <Fact label="Void" testId="drawer-void-reason">
+          {detail.voidReason}
+        </Fact>
+      ) : null}
+    </DrawerFacts>
+  )
+}
+
+/**
+ * Every stored line as its own row under its group's subhead, then the total and what is still
+ * due. A group shows its subtotal when it has more than one line and is not the invoice's only
+ * group (a deposit's subtotal would repeat the total just below it).
+ */
+function Lines({ detail }: { detail: InvoiceDetail }) {
+  const single = detail.groups.length === 1
+  return (
+    <section aria-label="Line items" className="flex flex-col gap-5" data-testid="drawer-lines">
+      {detail.groups.map((group) => (
+        <div key={group.group} className="flex flex-col gap-1" data-testid="drawer-group" data-group={group.group}>
+          <Subhead
+            aside={
+              group.lines.length > 1 && !single ? (
+                <span className="tabular-nums" data-testid="drawer-subtotal">
+                  {formatCents(group.subtotalCents)}
+                </span>
+              ) : null
+            }
+          >
+            {group.label}
+          </Subhead>
+          <ul className="flex flex-col">
+            {group.lines.map((line) => (
+              <li key={line.code} className="flex items-start justify-between gap-4 py-1.5 text-sm" data-testid="drawer-line" data-code={line.code}>
+                <div className="flex min-w-0 flex-col">
+                  <span>{line.title}</span>
+                  {line.basis ? <span className="text-xs text-muted-foreground">{line.basis}</span> : null}
+                </div>
+                <span className="shrink-0 tabular-nums" data-testid="drawer-line-amount">
+                  {formatCents(line.amountCents)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      <div className="flex flex-col gap-1 border-t border-border pt-3 text-sm" data-testid="drawer-totals">
+        <div className="flex items-baseline justify-between gap-4">
+          <span className={detail.displayStatus === "paid" ? "font-medium" : "text-muted-foreground"}>Total</span>
+          <span className={detail.displayStatus === "paid" ? "font-medium tabular-nums" : "tabular-nums"} data-testid="drawer-total">
+            {formatCents(detail.totalCents)}
+          </span>
+        </div>
+        {detail.displayStatus !== "paid" ? (
+          <div className="flex items-baseline justify-between gap-4 text-base font-medium">
+            <span>{detail.displayStatus === "void" ? "Amount due (void)" : "Amount due"}</span>
+            <span className="tabular-nums" data-testid="drawer-due">
+              {formatCents(detail.amountDueCents)}
+            </span>
           </div>
         ) : null}
-      </DialogContent>
-    </Dialog>
+      </div>
+    </section>
+  )
+}
+
+/** Each payment touching the invoice; with `onOpen` (Finance) a row opens that payment in the drawer. */
+function Payments({
+  payments,
+  title,
+  onOpen,
+  href,
+}: {
+  payments: readonly InvoicePaymentEntry[]
+  title: string
+  onOpen?: (paymentId: string, paymentIds: string[]) => void
+  href?: (paymentId: string) => string
+}) {
+  const ids = payments.map((payment) => payment.paymentId)
+  return (
+    <section aria-label={title} className="flex flex-col gap-1" data-testid="drawer-payments">
+      <Subhead>{title}</Subhead>
+      <ul className={cn("flex flex-col", onOpen && "-mx-2")}>
+        {payments.map((payment) => {
+          const content = (
+            <>
+              <div className="flex min-w-0 flex-col gap-1">
+                <PaymentStatusBadge status={payment.status} className="w-fit" />
+                <span className="text-xs text-muted-foreground">
+                  {payment.methodLabel} · started {formatIsoDay(payment.initiatedAt)}
+                  {payment.status === "settled" && payment.settledAt ? ` · settled ${formatIsoDay(payment.settledAt)}` : ""}
+                </span>
+                {payment.failureReason ? <span className="text-xs text-muted-foreground">{payment.failureReason}</span> : null}
+              </div>
+              <MoneyCell cents={payment.amountCents} className="ml-auto shrink-0" />
+            </>
+          )
+          return (
+            <li
+              key={payment.paymentId}
+              className={cn(
+                "relative flex items-start justify-between gap-4 border-b border-border py-2 text-sm last:border-b-0",
+                onOpen && "px-2 hover:bg-muted/60",
+              )}
+              data-testid="drawer-payment"
+              data-status={payment.status}
+              data-payment-id={payment.paymentId}
+            >
+              {onOpen ? (
+                <RowOpener
+                  href={href?.(payment.paymentId)}
+                  onOpen={() => onOpen(payment.paymentId, ids)}
+                  className="flex-1 items-start whitespace-normal"
+                  testId="drawer-payment-open"
+                >
+                  {content}
+                </RowOpener>
+              ) : (
+                content
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
+/** Finance's compact history: one line per event, oldest first, with its time. */
+function History({ detail }: { detail: InvoiceDetail }) {
+  const entries = invoiceHistory(detail)
+  return (
+    <section aria-label="History" className="flex flex-col gap-1" data-testid="drawer-history">
+      <Subhead>History</Subhead>
+      <ol className="flex flex-col">
+        {entries.map((entry) => (
+          <li key={entry.key} className="flex items-baseline gap-3 py-1 text-sm" data-testid="drawer-history-entry" data-key={entry.key}>
+            <span className="w-44 shrink-0 text-xs text-muted-foreground tabular-nums">{entry.at ? formatHistoryWhen(entry.at) : "—"}</span>
+            <span className="min-w-0">
+              {entry.title}
+              {entry.detail ? <span className="text-muted-foreground"> · {entry.detail}</span> : null}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
   )
 }

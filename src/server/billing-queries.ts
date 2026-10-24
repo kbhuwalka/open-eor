@@ -118,6 +118,8 @@ export type InvoiceListQuery = {
   issuedTo?: string
   /** Every word must appear in the person's name or the invoice number. */
   q?: string
+  /** Only invoices whose due date falls in this ageing bucket today (`ageingBucketFor`, the Eastern business day). */
+  ageingBucket?: AgeingBucket
   sort?: InvoiceSortKey
   dir?: "asc" | "desc"
   page?: number
@@ -338,6 +340,10 @@ function paginate<T>(items: readonly T[], page: number | undefined, pageSize: nu
 }
 
 function listInvoices(db: Reader, scope: Scope & { companyId: string | null }, query: InvoiceListQuery, now: Date): Page<InvoiceListRow> {
+  return paginate(filterInvoices(db, scope, query, now), query.page, query.pageSize)
+}
+
+function filterInvoices(db: Reader, scope: Scope, query: InvoiceListQuery, now: Date): InvoiceListRow[] {
   const conditions: SQL[] = []
   if (scope.companyId) conditions.push(eq(invoices.companyId, scope.companyId))
   if (query.caseId) conditions.push(eq(onboardingCases.id, query.caseId))
@@ -346,8 +352,10 @@ function listInvoices(db: Reader, scope: Scope & { companyId: string | null }, q
   if (query.issuedTo) conditions.push(lte(invoices.issueDate, query.issuedTo))
   const words = (query.q ?? "").toLowerCase().split(/\s+/).filter(Boolean)
   const status = query.status ?? "all"
+  const today = businessDayOf(now)
   const rows = buildRows(db, conditions, now).filter((row) => {
     if (!matchesStatus(row, status)) return false
+    if (query.ageingBucket && ageingBucketFor(row.dueDate, today) !== query.ageingBucket) return false
     if (words.length === 0) return true
     const haystack = `${row.personName} ${row.number}`.toLowerCase()
     return words.every((word) => haystack.includes(word))
@@ -355,7 +363,7 @@ function listInvoices(db: Reader, scope: Scope & { companyId: string | null }, q
   const sorter = SORTERS[query.sort ?? "issueDate"]
   const sign = (query.dir ?? "desc") === "asc" ? 1 : -1
   rows.sort((a, b) => sign * sorter(a, b) || b.issueDate.localeCompare(a.issueDate) || b.number.localeCompare(a.number))
-  return paginate(rows, query.page, query.pageSize)
+  return rows
 }
 
 // ── Client: invoices, payments, summary ─────────────────────────────
@@ -379,6 +387,23 @@ export function listFinanceInvoices(
 ): Page<InvoiceListRow> {
   assertFinance(actor)
   return listInvoices(db, { companyId: query.companyId ?? null }, query, now)
+}
+
+/** Finance: every invoice matching `query`, filtered and sorted like `listFinanceInvoices` but not paginated. */
+export function filterFinanceInvoices(
+  db: Reader,
+  actor: SessionUser,
+  query: Omit<InvoiceListQuery, "page" | "pageSize"> & { companyId?: string } = {},
+  now: Date = new Date(),
+): InvoiceListRow[] {
+  assertFinance(actor)
+  return filterInvoices(db, { companyId: query.companyId ?? null }, query, now)
+}
+
+/** Finance: the invoices with these ids, in no particular order; unknown ids are left out. */
+export function financeInvoiceRows(db: Reader, actor: SessionUser, invoiceIds: readonly string[], now: Date = new Date()): InvoiceListRow[] {
+  assertFinance(actor)
+  return invoiceIds.length === 0 ? [] : buildRows(db, [inArray(invoices.id, [...invoiceIds])], now)
 }
 
 /** Ids of every payable invoice of the client's company: the "Pay all due" selection. */
@@ -520,6 +545,20 @@ export function listFinancePayments(
   if (query.status) conditions.push(eq(payments.status, query.status))
   if (query.companyId) conditions.push(eq(payments.companyId, query.companyId))
   return paginate(paymentRows(db, conditions), query.page, query.pageSize)
+}
+
+/** Finance: every payment (of one company with `companyId`, or one payment with `paymentId`), newest first, not paginated. */
+export function financePaymentRows(
+  db: Reader,
+  actor: SessionUser,
+  query: { status?: PaymentStatus; companyId?: string; paymentId?: string } = {},
+): PaymentListRow[] {
+  assertFinance(actor)
+  const conditions: SQL[] = []
+  if (query.status) conditions.push(eq(payments.status, query.status))
+  if (query.companyId) conditions.push(eq(payments.companyId, query.companyId))
+  if (query.paymentId) conditions.push(eq(payments.id, query.paymentId))
+  return paymentRows(db, conditions)
 }
 
 /** One payment with the invoices it covers. `null` when it is not the actor's to see. */

@@ -115,7 +115,7 @@ test("new order: review, sign in the popup, create the order, see onboarding", a
 
 test("the signed agreement downloads from the person profile with its signature certificate", async ({ page, browser }) => {
   await signIn(page, /Alex Harper/)
-  await page.goto("/client")
+  await page.goto("/client/people")
   await page.getByTestId("person-row").first().getByRole("link").first().click()
   await page.getByRole("tab", { name: "Details" }).click()
 

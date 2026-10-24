@@ -3,22 +3,20 @@ import { cn } from "cn"
 
 import { ThemeScope } from "@/components/theme-scope"
 import { readThemeId } from "@/lib/theme-cookie"
-import { DARK_THEMES, type ThemeId } from "@/lib/themes"
+import { DARK_THEMES } from "@/lib/themes"
 
 /**
- * Applies the active preset to a subtree server-side (no flash). Portal layouts
- * render it inside their Suspense boundary; `force` pins a preset (the picker).
+ * Applies the active preset to a subtree server-side (no flash). Portal layouts and the persona
+ * picker render it inside their Suspense boundary, because it reads the theme cookie.
  */
 export async function ThemeRoot({
   children,
-  force,
   className,
 }: {
   children: ReactNode
-  force?: ThemeId
   className?: string
 }) {
-  const themeId = force ?? (await readThemeId())
+  const themeId = await readThemeId()
   return (
     <div
       data-theme={themeId}

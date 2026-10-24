@@ -1,31 +1,28 @@
 "use client"
 
+import { useRouter } from "next/navigation"
+
 import { FinanceDashboard, type FinanceDashboardProps } from "@/components/finance/finance-dashboard"
-import type { PayOutcome } from "@/lib/finance-view"
+import { invoiceDrawerHref } from "@/lib/invoice-links"
 
-import { getInvoiceDetailAction, payInvoicesAction } from "./actions"
+import { invoicePdfHref, loadInvoiceDetail, payInvoices } from "./client-bindings"
 
-async function payInvoices(invoiceIds: string[]): Promise<PayOutcome> {
-  const result = await payInvoicesAction(invoiceIds)
-  if (result.ok) return { ok: true, ...result.data }
-  const code = typeof result.details?.error === "string" ? result.details.error : result.code
-  return { ok: false, message: result.message, code }
-}
+type Data = Pick<FinanceDashboardProps, "summary" | "invoices" | "payments" | "method" | "linkedInvoiceId">
 
-const pdfHref = (invoiceId: string) => `/client/finance/invoices/${encodeURIComponent(invoiceId)}/pdf`
-const invoiceHref = (invoiceId: string) => `/client/finance/invoices/${encodeURIComponent(invoiceId)}`
-
-type Data = Pick<FinanceDashboardProps, "summary" | "invoices" | "payments" | "method">
-
-/** Binds the real server actions to the dashboard; the data arrives from the server page. */
+/**
+ * Binds the real server actions to the dashboard; the data arrives from the server page. Closing a
+ * drawer that `?open=` opened drops the parameter with `router.replace`, so a reload does not reopen it.
+ */
 export function FinanceClient(data: Data) {
+  const router = useRouter()
   return (
     <FinanceDashboard
       {...data}
       payInvoices={payInvoices}
-      loadInvoiceDetail={getInvoiceDetailAction}
-      pdfHref={pdfHref}
-      invoiceHref={invoiceHref}
+      loadInvoiceDetail={loadInvoiceDetail}
+      pdfHref={invoicePdfHref}
+      invoiceHref={invoiceDrawerHref}
+      onLinkClosed={() => router.replace("/client/finance", { scroll: false })}
     />
   )
 }

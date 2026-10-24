@@ -10,6 +10,24 @@ export function formatCents(cents: number): string {
   return usd.format(cents / 100)
 }
 
+const compactUsd = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  notation: "compact",
+  maximumSignificantDigits: 3,
+  maximumFractionDigits: 1,
+  roundingPriority: "lessPrecision",
+})
+
+/**
+ * "$950", "$38.5K", "$212K", "$1.2M": whole dollars, at most one decimal and three significant
+ * digits, for chart axes, labels and tiles. Always pair it with the exact `formatCents` figure in
+ * a tooltip or accessible label, because the rounding hides cents and thousands.
+ */
+export function formatCompactCents(cents: number): string {
+  return compactUsd.format(Math.round(cents / 100))
+}
+
 const UNIT_SUFFIX: Record<WageUnit, string> = { hourly: "hr", monthly: "mo", annual: "yr" }
 
 /** "$65.00 / hr", "$12,500 / mo" or "$150,000 / yr". Whole-dollar amounts drop the cents above hourly. */

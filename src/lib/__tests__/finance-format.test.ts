@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { formatIsoDay, formatIsoRange } from "../finance-format"
+import { formatIsoDay, formatIsoMonth, formatIsoRange, isoMonthKey } from "../finance-format"
 
 describe("formatIsoDay", () => {
   it("prints a plain day as is", () => {
@@ -11,6 +11,20 @@ describe("formatIsoDay", () => {
     expect(formatIsoDay("2026-10-16T00:30:00.000Z")).toBe("Oct 15, 2026")
     expect(formatIsoDay("2026-10-16T04:00:00.000Z")).toBe("Oct 16, 2026")
     expect(formatIsoDay("2027-01-01T03:00:00.000Z")).toBe("Dec 31, 2026")
+  })
+})
+
+describe("isoMonthKey and formatIsoMonth", () => {
+  it("files a timestamp under its America/New_York month, not the UTC one", () => {
+    expect(isoMonthKey("2026-10-15")).toBe("2026-10")
+    expect(isoMonthKey("2026-11-01T02:00:00.000Z")).toBe("2026-10")
+    expect(isoMonthKey("2027-01-01T03:00:00.000Z")).toBe("2026-12")
+  })
+
+  it("names the month in full from a day, a timestamp or a month key", () => {
+    expect(formatIsoMonth("2026-10-15")).toBe("October 2026")
+    expect(formatIsoMonth("2026-11-01T02:00:00.000Z")).toBe("October 2026")
+    expect(formatIsoMonth("2026-01")).toBe("January 2026")
   })
 })
 

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 
 import { Button } from "@/components/ui/button"
 import { withNotice } from "@/lib/task-notice"
+import { portalHomeHref } from "@/lib/task-ui-registry"
 
 import { TASK_DIALOGS } from "./task-dialogs"
 import { TaskDetailFallback } from "./task-detail-fallback"
@@ -37,7 +38,7 @@ export function DialogTaskScreen(props: TaskScreenProps) {
         onOpenChange={setOpen}
         onDone={() => {
           setOpen(false)
-          router.push(withNotice(`/${portal}`, task.id))
+          router.push(withNotice(portalHomeHref(portal), task.id))
         }}
       />
     </TaskScreenFrame>

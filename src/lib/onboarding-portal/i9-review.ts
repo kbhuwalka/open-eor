@@ -1,6 +1,6 @@
 /**
- * Pure helpers of the I-9 Section 2 review screen (onboarding-portal.md §3): the checklist the
- * specialist verifies against, the reject reason that names the documents, and the rejection history.
+ * Pure helpers of the I-9 Section 2 review (onboarding-portal.md §3): the shapes the drawer shows,
+ * the reject reason that names the documents, and the rejection history.
  *
  * The engine rejects a *task* with `{ code, note? }` (domain §5 W3); it has no per-document reason.
  * "Per document" is therefore encoded in the note, which the employee reads verbatim:
@@ -37,49 +37,23 @@ export type UploadedDocumentView = {
   url: string
 }
 
-export type ChecklistItem = {
-  id: string
-  label: string
-  /** The domain rule behind it, in a sentence. */
-  rule: string
+/** What the employee entered about one upload, as the specialist reviews it. */
+export type ReviewedDocumentDetails = {
+  title: string
+  issuingAuthority: string
+  /**
+   * In full while the specialist can still sign (they attest to it), else `•••• 6789`; a Social
+   * Security card's number is always `***-**-6789` (`reviewedDocumentNumber`). Never log it or put
+   * it in a list view.
+   */
+  number: string
+  /** `YYYY-MM-DD`, null when the document has no expiration date. */
+  expiresOn: string | null
 }
 
-/** What the specialist confirms against the originals, from `work-auth.ts` and the I-9 instructions. */
-export function i9Checklist(kinds: readonly DocumentKind[]): ChecklistItem[] {
-  const items: ChecklistItem[] = [
-    {
-      id: "combo",
-      label: "The documents are an acceptable combination",
-      rule: "One List A document, or one List B and one List C document. Never a mix.",
-    },
-    {
-      id: "genuine",
-      label: "Each document looks genuine and relates to the employee",
-      rule: "Examine the original in the employee's presence or, for remote hires, by the authorized procedure.",
-    },
-    {
-      id: "name",
-      label: "The name and photo match the employee",
-      rule: "Names on the documents must match the name on Section 1 (maiden names and suffixes included).",
-    },
-    {
-      id: "expiry",
-      label: "No document has expired",
-      rule: "Expired documents are not acceptable, except where the form's instructions say otherwise.",
-    },
-    {
-      id: "legible",
-      label: "Every page is legible",
-      rule: "Both sides of a card, and every page that carries the number or the expiry date.",
-    },
-  ]
-  if (kinds.includes("list_b") && !kinds.includes("list_c")) {
-    items.push({ id: "missing_c", label: "A List C document is still needed", rule: "A List B identity document alone does not prove work authorization." })
-  }
-  if (kinds.includes("list_c") && !kinds.includes("list_b")) {
-    items.push({ id: "missing_b", label: "A List B document is still needed", rule: "A List C document alone does not prove identity." })
-  }
-  return items
+export type ReviewedDocumentView = UploadedDocumentView & {
+  /** Null for an upload made before employees entered document details. */
+  details: ReviewedDocumentDetails | null
 }
 
 export type RejectionInput = {

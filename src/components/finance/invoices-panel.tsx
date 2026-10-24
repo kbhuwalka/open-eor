@@ -31,7 +31,7 @@ export type InvoicesPanelProps = {
   invoices: readonly InvoiceRow[]
   selected: ReadonlySet<string>
   onSelectedChange: (next: Set<string>) => void
-  onOpen: (row: InvoiceRow) => void
+  onOpen: (row: InvoiceRow, orderedIds: string[]) => void
   onPay: (invoiceIds: string[]) => void
   canPay: boolean
   /** Why Pay is disabled; shown beside the buttons when `canPay` is false. */

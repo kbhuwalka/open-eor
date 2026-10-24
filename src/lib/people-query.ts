@@ -2,7 +2,7 @@ import { isPersonStatus, type PersonStatus } from "@/domain/person-status"
 
 import { DEFAULT_PAGE_SIZE, isPageSize, type PageSize } from "./pagination"
 
-export const PEOPLE_SORT_KEYS = ["name", "role", "location", "status"] as const
+export const PEOPLE_SORT_KEYS = ["name", "client", "role", "location", "status"] as const
 export type PeopleSortKey = (typeof PEOPLE_SORT_KEYS)[number]
 export type SortDir = "asc" | "desc"
 
@@ -13,9 +13,13 @@ export type SortDir = "asc" | "desc"
 export type PeopleQuery = {
   q: string
   status: PersonStatus | null
+  /** Client company id: a staff filter, ignored in the client portal (a client sees only its own people). */
+  client: string | null
   /** Role id. */
   role: string | null
   location: string | null
+  /** Only onboarding people whose start is at risk (`?atRisk=1`): what the Home's At risk card counts. */
+  atRisk: boolean
   sort: PeopleSortKey | null
   dir: SortDir
   page: number
@@ -25,8 +29,10 @@ export type PeopleQuery = {
 export const DEFAULT_PEOPLE_QUERY: PeopleQuery = {
   q: "",
   status: null,
+  client: null,
   role: null,
   location: null,
+  atRisk: false,
   sort: null,
   dir: "asc",
   page: 1,
@@ -46,6 +52,7 @@ function isSortKey(value: unknown): value is PeopleSortKey {
 /** Never throws: anything unrecognised falls back to the default. */
 export function parsePeopleQuery(params: RawParams): PeopleQuery {
   const status = first(params.status)
+  const client = first(params.client)
   const role = first(params.role)
   const location = first(params.location)?.toUpperCase()
   const sort = first(params.sort)
@@ -54,8 +61,10 @@ export function parsePeopleQuery(params: RawParams): PeopleQuery {
   return {
     q: (first(params.q) ?? "").trim().slice(0, 100),
     status: isPersonStatus(status) ? status : null,
+    client: client && /^[\w-]{1,64}$/.test(client) ? client : null,
     role: role && /^[\w-]{1,64}$/.test(role) ? role : null,
     location: location && /^[A-Z]{2}$/.test(location) ? location : null,
+    atRisk: first(params.atRisk) === "1",
     sort: isSortKey(sort) ? sort : null,
     dir: first(params.dir) === "desc" ? "desc" : "asc",
     page: Number.isFinite(page) && page > 1 ? page : 1,
@@ -68,8 +77,10 @@ export function peopleSearch(query: PeopleQuery): string {
   const p = new URLSearchParams()
   if (query.q) p.set("q", query.q)
   if (query.status) p.set("status", query.status)
+  if (query.client) p.set("client", query.client)
   if (query.role) p.set("role", query.role)
   if (query.location) p.set("location", query.location)
+  if (query.atRisk) p.set("atRisk", "1")
   if (query.sort) {
     p.set("sort", query.sort)
     p.set("dir", query.dir)
@@ -97,5 +108,5 @@ export function cycleSort(
 }
 
 export function hasActiveFilters(query: PeopleQuery): boolean {
-  return Boolean(query.q || query.status || query.role || query.location)
+  return Boolean(query.q || query.status || query.client || query.role || query.location || query.atRisk)
 }
