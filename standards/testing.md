@@ -184,8 +184,10 @@ Use Playwright for user flows.
 
 - Use `test.step()` for distinct user actions.
 - Avoid `waitForTimeout`; use assertions, `waitFor`, or `toPass`.
-- E2E failures block merge unless the PR explicitly documents a non-app
-  infrastructure issue.
+- E2E runs in the local husky pre-commit hook (with unit tests), not in
+  GitHub Actions. Failures should block the commit unless an escape hatch
+  is used (`SKIP=pre-commit`, `HUSKY=0`, or `git commit --no-verify`); the
+  PR should note when hooks were skipped for a non-app infrastructure issue.
 - Do not extend broad end-to-end flows to cover low-level provider, API, or
   autosave races. Add narrow product-facing e2e regressions only when the
   behavior must be proven through the browser.
@@ -207,13 +209,13 @@ For most implementation PRs, run:
 
 ```bash
 pnpm lint
-pnpm test
+pnpm test:precommit   # unit then e2e (also the husky pre-commit hook)
 pnpm build
-pnpm test:e2e
 ```
 
-If a local verification step is skipped, explain why in the PR implementation
-record.
+Or rely on the pre-commit hook for unit + e2e and still run `pnpm lint` /
+`pnpm build` (those two remain the CI Quality Gates). If a local verification
+step or the hook is skipped, explain why in the PR implementation record.
 
 ---
 

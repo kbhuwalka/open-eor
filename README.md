@@ -3,7 +3,7 @@
 EOR worker-onboarding demo for Project SpaceXAI_Demo (factory Issue→PR→review).
 
 **Stack:** Next.js App Router + TypeScript + shadcn/ui + **Drizzle + SQLite** + **iron-session**  
-**Tests:** Vitest (unit/component), Playwright (e2e)  
+**Tests:** Vitest (unit/component) + Playwright (e2e) locally via husky pre-commit; CI runs Lint + Production Build  
 **Package manager:** pnpm
 
 ## Specifications
@@ -41,8 +41,31 @@ Seeded personas: Client HR (Alex Harper), Worker (Jordan Lee, owns `case_pending
 | `pnpm test` | Vitest unit/component tests |
 | `pnpm test:watch` | Vitest watch mode |
 | `pnpm test:e2e` | Playwright e2e (live specs need a copy database outside the project, see [`e2e/README.md`](./e2e/README.md)) |
+| `pnpm test:precommit` | Vitest then Playwright (same sequence as the git pre-commit hook) |
 | `pnpm db:push` | Push Drizzle schema to SQLite |
 | `pnpm db:seed` | Reseed demo data |
+
+## Pre-commit hooks
+
+After `pnpm install`, husky installs a **pre-commit** hook that runs `pnpm test:precommit` (unit tests first, then the full Playwright suite). Playwright starts `pnpm dev` when `PLAYWRIGHT_BASE_URL` is unset; expect several minutes on a full suite. Quality Gates on GitHub Actions only run **Lint** and **Production Build**.
+
+Enable / refresh hooks:
+
+```bash
+pnpm install          # runs `prepare` → husky
+# or, if hooks were missing:
+pnpm exec husky
+```
+
+Skip when needed (documented escape hatches):
+
+| Method | Effect |
+| --- | --- |
+| `SKIP=pre-commit git commit …` | Skips this hook (`SKIP=tests` or `SKIP=all` also work) |
+| `HUSKY=0 git commit …` | Disables all husky hooks for that command |
+| `git commit --no-verify` | Git built-in; skips all hooks |
+
+Prefer fixing failing tests over skipping. Agents and WIP commits may use an escape hatch; say so in the PR if tests were not run.
 
 ## Project layout
 

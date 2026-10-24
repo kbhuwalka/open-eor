@@ -25,7 +25,9 @@ Next.js (repo root), pnpm, Node 24. Unit/component tests in `__tests__/`; e2e in
 
 ```bash
 pnpm lint && pnpm test && pnpm build
-# e2e optional in agent; CI is merge gate
+# Local: husky pre-commit runs unit then e2e (`pnpm test:precommit`).
+# CI Quality Gates: Lint + Production Build only (not unit/e2e).
+# Skip hooks when needed: SKIP=pre-commit | HUSKY=0 | git commit --no-verify
 ```
 
 ## Skills / scripts

@@ -2,9 +2,10 @@
 # submit-pr.sh — Watch required Quality Gates checks, then squash-merge.
 #
 # CI runs automatically on pull_request (no label retrigger). Required checks:
-#   Lint / Unit Tests / Production Build / End-to-End Tests
+#   Lint / Production Build
+# (Unit + Playwright e2e run locally via the husky pre-commit hook.)
 #
-# Those four jobs are decided from Actions workflow runs for the PR head SHA
+# Those jobs are decided from Actions workflow runs for the PR head SHA
 # (`gh run list` / `gh run view` on the Quality Gates workflow). This script
 # does not read statusCheckRollup or the Checks API. A 403 from the Actions
 # API is fatal: the token cannot read Actions, and that is not pending CI.
@@ -32,7 +33,7 @@ if ! command -v gh >/dev/null 2>&1; then
   fi
 fi
 
-REQUIRED_CHECKS=("Lint" "Unit Tests" "Production Build" "End-to-End Tests")
+REQUIRED_CHECKS=("Lint" "Production Build")
 WORKFLOW_NAME="Quality Gates"
 
 # ---------------------------------------------------------------------------
@@ -52,7 +53,7 @@ DESCRIPTION
   2. Requires a formal GitHub approving review on the current head SHA
      (latest APPROVED/CHANGES_REQUESTED whose commit.oid equals head must
      be APPROVED). Checked again immediately before merge. Does not poll.
-  3. Decides the four required jobs from the Quality Gates Actions workflow
+  3. Decides the required jobs from the Quality Gates Actions workflow
      run for the PR head SHA (`gh run list` / `gh run view`). It does not
      read statusCheckRollup or the Checks API.
   4. If those jobs already succeeded, skips watching and squash-merges
@@ -65,7 +66,9 @@ DESCRIPTION
      contains a "Closes #N" / "Fixes #N" / "Resolves #N" reference.
 
   Required check names (exact):
-    Lint, Unit Tests, Production Build, End-to-End Tests
+    Lint, Production Build
+
+  Unit and e2e are not CI jobs; they run in the local husky pre-commit hook.
 
   There is no label-gated CI. Pushing/updating a PR triggers Quality Gates.
   If the Actions API returns 403, the script exits 4 (gave up) and reports

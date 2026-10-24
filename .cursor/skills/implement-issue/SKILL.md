@@ -13,7 +13,7 @@ Cursor already checked out a working branch from `main` — stay on it. PR base 
 
 1. **Gate:** `bash scripts/issue.sh <n> --verify-unblocked`
 2. **Plan** if non-mechanical (below)
-3. **Implement** + `pnpm lint && pnpm test && pnpm build` (e2e optional; CI is merge gate)
+3. **Implement** + `pnpm lint && pnpm test:precommit && pnpm build` (record in the PR if the hook / `test:precommit` was skipped). CI merge gate is Lint + Production Build.
 4. **Push + open PR** to `main` with `Closes #<n>`; fill the PR template
 5. **After each push that awaits review/CI:** subscribe (below), then **end the turn**. Do **not** spawn a `review-pr` worker. Do **not** busy-wait / sleep-poll. The EM does not review and does not merge.
 6. **On every wake** (PR notification, CI notification, or stuck timer): re-read the PR, then apply the **Wake decision table** once (first match wins). Do not invent a second procedure.
@@ -22,7 +22,7 @@ Review is owned by the Cursor Automation on this repo (GitHub login often `curso
 
 **CI green alone is not “review passed.”** `submit-pr.sh` still watches Quality Gates before merge; run it only after an approving review **on the current head**.
 
-`review-pr` and `scripts/submit-review.sh` remain for manual one-offs only — not the happy path.
+`review-pr` and `scripts/submit-review.sh` remain for manual one-offs only — not the happy path. Unit and e2e run locally via husky / `pnpm test:precommit` (not CI).
 
 ## Subscribe after each push (then end turn)
 
@@ -50,7 +50,7 @@ gate_rc=$?
 set -e
 # gate_rc 0 + APPROVED → approved. gate_rc 1 → CHANGES_REQUESTED or NONE (expected).
 # gate_rc 2 → broken gate input; stop the turn and report (do not continue the table).
-# CI = the four Quality Gates jobs (Lint, Unit Tests, Production Build, End-to-End Tests)
+# CI = Quality Gates jobs Lint + Production Build (unit/e2e are local pre-commit)
 # via Actions / submit-pr semantics — not the full `gh pr checks` list (that includes Automation).
 ```
 

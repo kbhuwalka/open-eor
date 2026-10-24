@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+# Runs Vitest then Playwright before each commit (CI no longer runs these).
+#
+# Escape hatches (any one):
+#   SKIP=pre-commit git commit …     # this hook only (also: SKIP=tests|all)
+#   HUSKY=0 git commit …             # disable all husky hooks
+#   git commit --no-verify           # git built-in; skips all hooks
+#
+# See README "Pre-commit hooks".
+set -e
+case ",${SKIP:-}," in
+  *,pre-commit,*|*,tests,*|*,all,*)
+    echo "pre-commit: skipped (SKIP=${SKIP})"
+    exit 0
+    ;;
+esac
+pnpm test:precommit
