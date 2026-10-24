@@ -36,7 +36,7 @@ Review is owned by the Cursor Automation on this repo (GitHub login often `curso
    3. `subscribe_timer` with that name, `delaySeconds: 900`, `once: true`. Prompt: “Apply the implement-issue Wake decision table for PR \<n\> (timer wake).”
 4. State what you are waiting for, then **end the turn**.
 
-When notifying Kunal of a stuck PR, prefer Slack `#spacexsi-demo-factory` (`C0CBESZU7TR`) if a Slack send tool is available. Slack MCP posts as the authenticated user; Cursor bot identity needs the Cursor Slack app invited to that channel. Slack unavailable must **not** block the PR — fall back to a clear agent-turn / EM message.
+When notifying Kunal of a stuck PR, post to Slack `#spacexsi-demo-factory` (`C0CBESZU7TR`) and **also** send a clear note to the EM (Project chat). Prefer a **Cursor-bot** send path (Automations **Send to Slack**) when available — user Slack MCP posts as Kunal and **will not notify him** of his own messages. Inviting `@Cursor` to the channel does not change MCP authorship. Setup: Project store `docs/factory-stuck-slack-as-cursor.md`. Slack unavailable must **not** block the PR — EM/agent-turn message is enough to stop silently.
 
 ### Wake decision table (first match wins)
 
