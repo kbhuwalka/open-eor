@@ -42,7 +42,7 @@ bash scripts/submit-pr.sh --pr <n>   # engineer, after Automation approve: CI �
 bash scripts/submit-review.sh --pr <n> --verdict APPROVED|CHANGES_REQUESTED …
 ```
 
-One Issue → one PR. `Closes #<n>`. CI always-on (no label gate). CI green ≠ review passed — the Automation owns review. After open/push, engineers **subscribe** (`subscribe_github_pr` + 10‑min `subscribe_timer`) and end the turn; they do not spawn a reviewer or busy-poll.
+One Issue → one PR. `Closes #<n>`. CI always-on (no label gate). CI green ≠ review passed — the Automation owns review. After each **push** that awaits review/CI, engineers **subscribe** (`subscribe_github_pr` + `subscribe_github_ci` + once `subscribe_timer` 900s stuck alert, clock restarted on that push) and end the turn; they do not spawn a reviewer or busy-poll. If still stuck at 15m, notify Kunal (Slack if available, else agent/EM message) — Slack is not a merge gate.
 
 <!-- BEGIN:nextjs-agent-rules -->
 
