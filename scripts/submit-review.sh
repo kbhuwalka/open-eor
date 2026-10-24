@@ -15,10 +15,11 @@
 #   - Each --followup must have 2 pipe-separated fields: issue number and description
 #
 # Posts exactly one pull-request comment (`gh pr comment`). The first line
-# of that comment is the verdict word. This script does not approve, request changes, or
-# dismiss reviews, and it does not call `gh pr review` or the pull-request
-# review API. Prints VERDICT:<result> to stdout. Exits 0 when the comment
-# is posted.
+# of that comment is the verdict word. This script does not approve, request
+# changes, or dismiss reviews, and it does not call `gh pr review` or the
+# pull-request review API. A comment verdict does NOT satisfy submit-pr.sh
+# (that script requires a formal GitHub approving review on the head SHA).
+# Prints VERDICT:<result> to stdout. Exits 0 when the comment is posted.
 
 set -euo pipefail
 

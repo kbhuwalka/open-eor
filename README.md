@@ -59,4 +59,4 @@ Preferred host: [Vercel](https://vercel.com). Ensure `better-sqlite3` native bui
 
 ## Factory dry-run
 
-Engineers own one Issue end-to-end and spawn a reviewer on the open PR before merge.
+Engineers own one Issue end-to-end. After each push they subscribe for Cursor Automation review (formal GitHub approve / request-changes on the head SHA). After an approve on the current head they run `scripts/submit-pr.sh`. Stuck wakes use `scripts/factory-slack.sh` (plus EM) — not user Slack MCP.
