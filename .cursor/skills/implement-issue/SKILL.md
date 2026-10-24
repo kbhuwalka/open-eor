@@ -36,7 +36,7 @@ Review is owned by the Cursor Automation on this repo (GitHub login often `curso
    3. `subscribe_timer` with that name, `delaySeconds: 900`, `once: true`. Prompt: “Apply the implement-issue Wake decision table for PR \<n\> (timer wake).”
 4. State what you are waiting for, then **end the turn**.
 
-Slack unavailable must **not** block the PR — use the agent-turn / EM message fallback when notifying Kunal.
+When notifying Kunal of a stuck PR, prefer Slack `#spacexsi-demo-factory` (`C0CBESZU7TR`) if a Slack send tool is available. Slack MCP posts as the authenticated user; Cursor bot identity needs the Cursor Slack app invited to that channel. Slack unavailable must **not** block the PR — fall back to a clear agent-turn / EM message.
 
 ### Wake decision table (first match wins)
 
