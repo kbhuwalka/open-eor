@@ -115,14 +115,14 @@ while [[ $# -gt 0 ]]; do
     *)
       echo "error: unknown argument: $1" >&2
       echo "Run 'bash scripts/submit-pr.sh --help' for usage." >&2
-      exit 1 ;;
+      exit 4 ;;
   esac
 done
 
 [[ -n "$PR" ]] || {
   echo "error: --pr is required" >&2
   echo "Run 'bash scripts/submit-pr.sh --help' for usage." >&2
-  exit 1
+  exit 4
 }
 
 # ---------------------------------------------------------------------------
@@ -187,8 +187,8 @@ require_approving_review() {
   local state author
   state=$(printf '%s\n' "$out" | cut -f1)
   author=$(printf '%s\n' "$out" | cut -f2)
-  # Exit 2 from the gate module = broken invocation (bad JSON, missing --head), not "no approve".
-  if [[ $status -eq 2 ]]; then
+  # Exit 2 / missing STATE line / node crash = broken gate, not "not approved".
+  if [[ $status -eq 2 || -z "$state" ]]; then
     echo "✗ PR #${PR} — approving-review gate failed (module/CLI error)" >&2
     echo "  ${out}" >&2
     exit_gave_up

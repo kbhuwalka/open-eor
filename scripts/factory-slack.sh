@@ -69,8 +69,14 @@ if [[ -z "$CHANNEL_ID" && -z "$CHANNEL" ]]; then
   CHANNEL_ID="C0CBESZU7TR"
 fi
 
-URL="${FACTORY_SLACK_POSTER_WEBHOOK_URL:-}"
-KEY="${FACTORY_SLACK_POSTER_WEBHOOK_KEY:-}"
+# Strip CR/LF — trailing newlines in secrets break HTTP/2 Authorization headers.
+URL="$(printf '%s' "${FACTORY_SLACK_POSTER_WEBHOOK_URL:-}" | tr -d '\r\n')"
+KEY="$(printf '%s' "${FACTORY_SLACK_POSTER_WEBHOOK_KEY:-}" | tr -d '\r\n')"
+# If the stored secret already includes the "Bearer " prefix, do not double it.
+AUTH_VALUE="$KEY"
+if [[ "$AUTH_VALUE" != [Bb]earer\ * ]]; then
+  AUTH_VALUE="Bearer ${KEY}"
+fi
 
 if [[ -z "$URL" || -z "$KEY" ]]; then
   echo "error: FACTORY_SLACK_POSTER_WEBHOOK_URL and FACTORY_SLACK_POSTER_WEBHOOK_KEY must be set in the cloud environment secrets" >&2
@@ -102,7 +108,8 @@ payload=$(
 http_code=$(
   curl -sS -o /tmp/factory-slack-poster-body.$$ -w "%{http_code}" \
     -X POST "$URL" \
-    -H "Authorization: Bearer ${KEY}" \
+    -H "Authorization: ${AUTH_VALUE}" \
+    -H "X-Automation-Key: ${KEY}" \
     -H "Content-Type: application/json" \
     --data-binary "$payload"
 ) || {
