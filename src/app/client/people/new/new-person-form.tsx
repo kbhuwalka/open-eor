@@ -4,6 +4,7 @@ import { useActionState, useId, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 
+import { useDemoShortcut } from "@/components/use-demo-shortcut"
 import { BenefitPackageFieldset } from "@/components/forms/benefit-package-fieldset"
 import { CompFieldset, useCompValue, type CompValue } from "@/components/forms/comp-fieldset"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -28,6 +29,7 @@ import { addDaysIso } from "@/domain/employment-term"
 import { buildQuote } from "@/domain/quote"
 import { effectiveHourlyCents, resolveWageFloor } from "@/domain/wage"
 import { formatSigningDate } from "@/components/signing"
+import { demoHire } from "@/lib/demo-hire"
 import { stateName, US_STATES } from "@/lib/us-states"
 import type { SignedAgreementSummary } from "@/server/master-agreement"
 import type { AgreementSummary, RoleRow } from "@/server/queries"
@@ -115,6 +117,21 @@ export function NewPersonForm({
     )
     setRoleId(created.id)
   }
+
+  useDemoShortcut(() => {
+    const hire = demoHire({ roleIds: roles.map((r) => r.id), earliestStart, wageUnit: comp.wageUnit })
+    setStep("details")
+    setAttempted(false)
+    setFirstName(hire.firstName)
+    setLastName(hire.lastName)
+    setEmail(hire.email)
+    setStateCode(hire.stateCode)
+    if (hire.roleId) setRoleId(hire.roleId)
+    setStartDate(hire.startDate)
+    setTermKind("indefinite")
+    setEndDate("")
+    setComp({ wage: hire.wage, wageUnit: comp.wageUnit })
+  })
 
   function reviewQuote() {
     setAttempted(true)

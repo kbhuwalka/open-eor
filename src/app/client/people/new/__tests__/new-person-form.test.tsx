@@ -85,6 +85,42 @@ async function reachReview(user: ReturnType<typeof userEvent.setup>) {
   return screen.findByTestId("quote-step")
 }
 
+const DEMO_SHORTCUT = "{Alt>}{Shift>}d{/Shift}{/Alt}"
+
+describe("the demo shortcut", () => {
+  it("prefills every required field, so Review quote goes straight through", async () => {
+    const user = userEvent.setup()
+    renderForm()
+    await user.keyboard(DEMO_SHORTCUT)
+    expect((screen.getByTestId("first-name-input") as HTMLInputElement).value).not.toBe("")
+    expect((screen.getByTestId("email-input") as HTMLInputElement).value).toMatch(/^[a-z]+\.[a-z]+@example\.com$/)
+    expect((screen.getByTestId("role-trigger") as HTMLSelectElement).value).toBe("role_1")
+    expect((screen.getByTestId("start-date-input") as HTMLInputElement).value).toMatch(/^2026-03-(09|16)$/)
+    await user.click(screen.getByTestId("review-quote"))
+    expect(await screen.findByTestId("quote-step")).toBeInTheDocument()
+    expect(screen.getByTestId("order-details")).toHaveTextContent("Engineer")
+  })
+
+  it("works from inside a field and makes a new hire each press", async () => {
+    const user = userEvent.setup()
+    renderForm()
+    await user.click(screen.getByTestId("first-name-input"))
+    const names = new Set<string>()
+    for (let i = 0; i < 6; i += 1) {
+      await user.keyboard(DEMO_SHORTCUT)
+      names.add((screen.getByTestId("email-input") as HTMLInputElement).value)
+    }
+    expect(names.size).toBeGreaterThan(1)
+  })
+
+  it("ignores D without Alt and Shift", async () => {
+    const user = userEvent.setup()
+    renderForm()
+    await user.keyboard("d")
+    expect((screen.getByTestId("first-name-input") as HTMLInputElement).value).toBe("")
+  })
+})
+
 async function signInDialog(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: "Review and sign" }))
   const dialog = await screen.findByTestId("signing-dialog")
