@@ -1,4 +1,4 @@
-# spacexai-demo
+# Open EOR
 
 Open source implementation of an EOR software (factory Issue→PR→review).
 
