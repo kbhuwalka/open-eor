@@ -1,6 +1,6 @@
 # spacexai-demo
 
-EOR worker-onboarding demo for Project SpaceXAI_Demo (factory Issue→PR→review).
+Open source implementation of an EOR software (factory Issue→PR→review).
 
 **Stack:** Next.js App Router + TypeScript + shadcn/ui + **Drizzle + SQLite** + **iron-session**  
 **Tests:** Vitest (unit/component) + Playwright (e2e) locally via husky pre-push; CI runs Lint + Production Build  
